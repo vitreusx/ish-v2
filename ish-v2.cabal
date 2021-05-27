@@ -1,0 +1,41 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           ish-v2
+version:        0.1.0.0
+category:       Web
+homepage:       https://github.com/githubuser/ish-v2#readme
+author:         Jakub Bednarz
+maintainer:     jb406103@students.mimuw.edu.pl
+copyright:      2021 Jakub Bednarz
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+executable ish-v2
+  main-is: Main.hs
+  other-modules:
+      Lexer
+      Parser
+      ParserDef
+      Syntax
+      Value
+      Paths_ish_v2
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , cmdargs
+    , containers
+    , haskeline
+    , lens
+    , megaparsec
+    , mtl
+    , parser-combinators
+    , text
+  default-language: Haskell2010
