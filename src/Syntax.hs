@@ -24,8 +24,9 @@ data Expr' a =
   ELit a Value
   | EVar a (Ident' a)
   | EApp a (Expr' a) [Expr' a]
-  | EUnaryOp a (Ident' a) (Expr' a)
-  | EBinaryOp a (Ident' a) (Expr' a) (Expr' a)
+  | EPrefix a (Ident' a) (Expr' a)
+  | EInfix a (Ident' a) (Expr' a) (Expr' a)
+  | EPostfix a (Ident' a) (Expr' a)
   | EFnDecl a (Maybe (Type' a)) [(Ident' a, Type' a)] [Stmt' a]
   deriving Functor
 

@@ -10,16 +10,21 @@ import           Indent
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer    as Lex
-import           Control.Monad.Combinators.Expr ( makeExprParser )
+import           Control.Monad.Combinators.Expr
 import           Control.Monad                  ( void )
 import           Control.Monad.State.Strict
 import           Control.Lens
+import           Data.Either
 
 sp :: Parser SourcePos
 sp = getSourcePos
 
 pTopLevel :: Parser TopLevel
-pTopLevel = TopLevel <$> sp <*> topLevel (block pStmt) <* eof
+pTopLevel = topLevel $ do
+  s     <- sp
+  items <- block ((Left <$> pStmt) <|> (Right <$> pDirective))
+  eof
+  return $ TopLevel s (lefts items)
 
 reservedWords :: [String]
 reservedWords =
@@ -40,6 +45,50 @@ reserved s = do
   try (symbol s)
   return ()
 
+pDirective :: Parser ()
+pDirective = symbol "#" >> squareBrackets pOperatorDef
+
+pOperatorDef :: Parser ()
+pOperatorDef = do
+  reserved "op"
+  prec <- intLit
+  op   <- pOperator
+  addOperator (prec, op)
+
+pOperator :: Parser (Operator Parser Expr)
+pOperator =
+  choice [try pInfixl, try pInfixn, pInfixr, pPrefix, pPostfix]
+
+pInfixl :: Parser (Operator Parser Expr)
+pInfixl = pInfix "infixl" InfixL
+
+pInfixr :: Parser (Operator Parser Expr)
+pInfixr = pInfix "infixr" InfixR
+
+pInfixn :: Parser (Operator Parser Expr)
+pInfixn = pInfix "infixn" InfixN
+
+pInfix
+  :: String
+  -> (Parser (Expr -> Expr -> Expr) -> Operator Parser Expr)
+  -> Parser (Operator Parser Expr)
+pInfix sig ctor = do
+  symbol sig
+  op <- opIdent
+  return $ ctor (EInfix <$> sp <*> (Ident <$> sp <*> symbol op))
+
+pPrefix :: Parser (Operator Parser Expr)
+pPrefix = do
+  symbol "prefix"
+  op <- opIdent
+  return $ Prefix (EPrefix <$> sp <*> (Ident <$> sp <*> symbol op))
+
+pPostfix :: Parser (Operator Parser Expr)
+pPostfix = do
+  symbol "postfix"
+  op <- opIdent
+  return $ Postfix (EPostfix <$> sp <*> (Ident <$> sp <*> symbol op))
+
 pIdent :: Parser Ident
 pIdent = try $ do
   s      <- sp
@@ -57,8 +106,7 @@ pValue = choice
 pFnArg :: Parser (Ident, Type)
 pFnArg = do
   x <- pIdent
-  reserved ":"
-  t <- pType
+  t <- (reserved ":" >> pType) <?> "type"
   return (x, t)
 
 pFnDeclHead :: Parser ([Stmt] -> Expr)

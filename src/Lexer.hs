@@ -8,6 +8,7 @@ import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer    as Lex
 import           Data.Text                      ( Text )
 import           Control.Monad                  ( void )
+import           Text.Read.Lex
 
 lineComment :: Parser ()
 lineComment = Lex.skipLineComment "//"
@@ -35,10 +36,16 @@ stringLit :: Parser String
 stringLit = char '\"' *> manyTill Lex.charLiteral (char '\"')
 
 intLit :: Parser Integer
-intLit = lexeme Lex.decimal
+intLit = Lex.signed sc (lexeme Lex.decimal)
 
 realLit :: Parser Double
-realLit = lexeme Lex.float
+realLit = Lex.signed sc (lexeme Lex.float)
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
+
+squareBrackets :: Parser a -> Parser a
+squareBrackets = between (symbol "[") (symbol "]")
+
+opIdent :: Parser String
+opIdent = lexeme (some $ satisfy isSymbolChar)
