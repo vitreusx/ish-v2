@@ -2,22 +2,28 @@
 
 module Syntax where
 
-import           Value
+import           Ontology
 import           Text.Megaparsec.Pos            ( SourcePos )
+
+type Anchor = Int
 
 -- TopLevel
 data TopLevel' a = TopLevel a [Stmt' a]
   deriving Functor
 
+deriving instance Eq a => Eq (TopLevel' a)
+deriving instance Ord a => Ord (TopLevel' a)
 deriving instance Show a => Show (TopLevel' a)
-type TopLevel = TopLevel' SourcePos
+type TopLevel = TopLevel' Anchor
 
 -- Ident
 data Ident' a = Ident a String
   deriving Functor
 
+deriving instance Eq a => Eq (Ident' a)
+deriving instance Ord a => Ord (Ident' a)
 deriving instance Show a => Show (Ident' a)
-type Ident = Ident' SourcePos
+type Ident = Ident' Anchor
 
 -- Expr
 data Expr' a =
@@ -27,24 +33,28 @@ data Expr' a =
   | EPrefix a (Ident' a) (Expr' a)
   | EInfix a (Ident' a) (Expr' a) (Expr' a)
   | EPostfix a (Ident' a) (Expr' a)
-  | EFnDecl a (Maybe (Type' a)) [(Ident' a, Type' a)] [Stmt' a]
+  | EFnDecl a (Maybe (Typename' a)) [(Ident' a, Typename' a)] [Stmt' a]
   deriving Functor
 
+deriving instance Eq a => Eq (Expr' a)
+deriving instance Ord a => Ord (Expr' a)
 deriving instance Show a => Show (Expr' a)
-type Expr = Expr' SourcePos
+type Expr = Expr' Anchor
 
 -- Type
-data Type' a =
+data Typename' a =
   Tyvar a (Ident' a)
-  | FnType a (Type' a) [Type' a]
+  | FnTypename a (Typename' a) [Typename' a]
   deriving Functor
 
-deriving instance Show a => Show (Type' a)
-type Type = Type' SourcePos
+deriving instance Eq a => Eq (Typename' a)
+deriving instance Ord a => Ord (Typename' a)
+deriving instance Show a => Show (Typename' a)
+type Typename = Typename' Anchor
 
 -- Stmt
 data Stmt' a =
-  Let a [(Ident' a, Maybe (Type' a), Expr' a)]
+  Let a [(Ident' a, Maybe (Typename' a), Expr' a)]
   | Assign a [(Ident' a, Expr' a)]
   | ExprStmt a [Expr' a]
   | If a (Expr' a) [Stmt' a]
@@ -56,5 +66,7 @@ data Stmt' a =
   | Return a (Maybe (Expr' a))
   deriving Functor
 
+deriving instance Eq a => Eq (Stmt' a)
+deriving instance Ord a => Ord (Stmt' a)
 deriving instance Show a => Show (Stmt' a)
-type Stmt = Stmt' SourcePos
+type Stmt = Stmt' Anchor

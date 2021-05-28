@@ -1,4 +1,4 @@
-#[op 0 infixl +]
+#[op 11 infixl <]
 
-let sum = fn(x: int, y: int)
-  return x - y
+let f = fn bool(x: int, y: int)
+  return x < y

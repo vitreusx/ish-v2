@@ -5,7 +5,7 @@ module Parser where
 import           Lexer
 import           ParserDef
 import           Syntax
-import           Value
+import           Ontology
 import           Indent
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
@@ -16,20 +16,19 @@ import           Control.Monad.State.Strict
 import           Control.Lens
 import           Data.Either
 
-sp :: Parser SourcePos
-sp = getSourcePos
+ref :: Parser Anchor
+ref = getOffset
 
 pTopLevel :: Parser TopLevel
 pTopLevel = topLevel $ do
-  s     <- sp
+  r     <- ref
   items <- block ((Left <$> pStmt) <|> (Right <$> pDirective))
   eof
-  return $ TopLevel s (lefts items)
+  return $ TopLevel r (lefts items)
 
 reservedWords :: [String]
 reservedWords =
   [ "if"
-  , "then"
   , "else"
   , "return"
   , "continue"
@@ -41,9 +40,7 @@ reservedWords =
   ]
 
 reserved :: String -> Parser ()
-reserved s = do
-  try (symbol s)
-  return ()
+reserved s = void $ try (symbol s)
 
 pDirective :: Parser ()
 pDirective = symbol "#" >> squareBrackets pOperatorDef
@@ -75,58 +72,59 @@ pInfix
 pInfix sig ctor = do
   symbol sig
   op <- opIdent
-  return $ ctor (EInfix <$> sp <*> (Ident <$> sp <*> symbol op))
+  return $ ctor (EInfix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pPrefix :: Parser (Operator Parser Expr)
 pPrefix = do
   symbol "prefix"
   op <- opIdent
-  return $ Prefix (EPrefix <$> sp <*> (Ident <$> sp <*> symbol op))
+  return $ Prefix (EPrefix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pPostfix :: Parser (Operator Parser Expr)
 pPostfix = do
   symbol "postfix"
   op <- opIdent
-  return $ Postfix (EPostfix <$> sp <*> (Ident <$> sp <*> symbol op))
+  return
+    $ Postfix (EPostfix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pIdent :: Parser Ident
 pIdent = try $ do
-  s      <- sp
+  r      <- ref
   ident' <- ident
   if ident' `elem` reservedWords
     then do
       fail $ "keyword " ++ (show ident') ++ " cannot be an identifier"
     else do
-      return $ Ident s ident'
+      return $ Ident r ident'
 
 pValue :: Parser Value
 pValue = choice
   [try (IntV <$> intLit), RealV <$> realLit, StringV <$> stringLit]
 
-pFnArg :: Parser (Ident, Type)
+pFnArg :: Parser (Ident, Typename)
 pFnArg = do
   x <- pIdent
-  t <- (reserved ":" >> pType) <?> "type"
+  t <- (reserved ":" >> pTypename) <?> "type"
   return (x, t)
 
 pFnDeclHead :: Parser ([Stmt] -> Expr)
 pFnDeclHead = do
-  p <- sp
+  r <- ref
   reserved "fn"
-  retType <- option Nothing (Just <$> (try pType))
+  retType <- option Nothing (Just <$> (try pTypename))
   args    <- parens (pFnArg `sepBy` symbol ",")
-  return $ EFnDecl p retType args
+  return $ EFnDecl r retType args
 
 pFnDecl :: Parser Expr
 pFnDecl = withBlock' ($) pFnDeclHead pStmt
 
 pApp :: Parser Expr
 pApp =
-  EApp <$> sp <*> pContExpr <*> parens (pExpr `sepBy` symbol ",")
+  EApp <$> ref <*> pContExpr <*> parens (pExpr `sepBy` symbol ",")
 
 pContExpr :: Parser Expr
 pContExpr = choice
-  [parens pExpr, ELit <$> sp <*> pValue, EVar <$> sp <*> pIdent]
+  [parens pExpr, ELit <$> ref <*> pValue, EVar <$> ref <*> pIdent]
 
 pExprTerm :: Parser Expr
 pExprTerm = choice [try pApp, pContExpr, try pFnDecl]
@@ -134,51 +132,52 @@ pExprTerm = choice [try pApp, pContExpr, try pFnDecl]
 pExpr :: Parser Expr
 pExpr = use opTable >>= makeExprParser pExprTerm
 
-pContType :: Parser Type
-pContType = choice [parens pType, Tyvar <$> sp <*> pIdent]
+pContTypename :: Parser Typename
+pContTypename = choice [parens pTypename, Tyvar <$> ref <*> pIdent]
 
-pFnType :: Parser Type
-pFnType = do
-  p <- sp
+pFnTypename :: Parser Typename
+pFnTypename = do
+  r <- ref
   reserved "fn"
-  retType  <- pContType
-  argTypes <- parens $ pType `sepBy` symbol ","
-  return $ FnType p retType argTypes
+  retType  <- pContTypename
+  argTypes <- parens $ pTypename `sepBy` symbol ","
+  return $ FnTypename r retType argTypes
 
-pType :: Parser Type
-pType = choice [try pContType, pFnType]
+pTypename :: Parser Typename
+pTypename = choice [try pContTypename, pFnTypename]
 
 pStmt :: Parser Stmt
 pStmt = choice
   [ pLet
   , try pAssign
-  , ExprStmt <$> sp <*> (pExpr `sepBy1` symbol ",")
+  , try pIfElse
   , pIf
-  , pIfElse
   , pFor
   , pWhile
   , pBreak
   , pContinue
   , pReturn
+  , ExprStmt <$> ref <*> (pExpr `sepBy1` symbol ",")
   ]
 
 pLet :: Parser Stmt
 pLet = withPos $ do
-  s <- sp
+  r <- ref
   reserved "let"
   letItems <- pLetItem `sepBy1` symbol ","
-  return $ Let s letItems
+  return $ Let r letItems
 
-pLetItem :: Parser (Ident, Maybe Type, Expr)
+pLetItem :: Parser (Ident, Maybe Typename, Expr)
 pLetItem = do
   x     <- pIdent
-  xType <- option Nothing (reserved ":" >> (Just <$> (try pType)))
+  xType <- option Nothing (reserved ":" >> (Just <$> (try pTypename)))
   reserved "="
   val <- pExpr
   return (x, xType, val)
 
 pAssign :: Parser Stmt
-pAssign = withPos $ Assign <$> sp <*> pAssignItem `sepBy1` symbol ","
+pAssign =
+  withPos $ Assign <$> ref <*> pAssignItem `sepBy1` symbol ","
 
 pAssignItem :: Parser (Ident, Expr)
 pAssignItem = do
@@ -187,62 +186,62 @@ pAssignItem = do
   val <- pExpr
   return (x, val)
 
-pIfHead :: Parser (SourcePos, Expr)
+pIfHead :: Parser (Anchor, Expr)
 pIfHead = do
-  s <- sp
+  r <- ref
   reserved "if"
   cond <- parens pExpr
-  return (s, cond)
+  return (r, cond)
 
 pIf :: Parser Stmt
 pIf = do
-  ((s, cond), body) <- withBlock (,) pIfHead pStmt
-  return $ If s cond body
+  ((r, cond), body) <- withBlock (,) pIfHead pStmt
+  return $ If r cond body
 
 pElseHead :: Parser ()
 pElseHead = void $ reserved "else"
 
 pIfElse :: Parser Stmt
 pIfElse = do
-  ((s, cond), then') <- withBlock (,) pIfHead pStmt
+  ((r, cond), then') <- withBlock (,) pIfHead pStmt
   else'              <- withBlock (flip const) pElseHead pStmt
-  return $ IfElse s cond then' else'
+  return $ IfElse r cond then' else'
 
 pForHead :: Parser ([Stmt] -> Stmt)
 pForHead = do
-  s <- sp
+  r <- ref
   reserved "for"
   (x, seq) <- parens $ (,) <$> pIdent <* reserved "in" <*> pExpr
-  return $ For s x seq
+  return $ For r x seq
 
 pFor :: Parser Stmt
 pFor = withBlock ($) pForHead pStmt
 
 pWhileHead :: Parser ([Stmt] -> Stmt)
 pWhileHead = do
-  s <- sp
+  r <- ref
   reserved "while"
   cond <- parens pExpr
-  return $ While s cond
+  return $ While r cond
 
 pWhile :: Parser Stmt
 pWhile = withBlock ($) pWhileHead pStmt
 
 pBreak :: Parser Stmt
 pBreak = withPos $ do
-  s <- sp
+  r <- ref
   reserved "break"
-  return (Break s)
+  return (Break r)
 
 pContinue :: Parser Stmt
 pContinue = withPos $ do
-  s <- sp
+  r <- ref
   reserved "continue"
-  return (Continue s)
+  return (Continue r)
 
 pReturn :: Parser Stmt
 pReturn = withPos $ do
-  s <- sp
+  r <- ref
   reserved "return"
   retVal <- option Nothing (Just <$> (try pExpr))
-  return $ Return s retVal
+  return $ Return r retVal
