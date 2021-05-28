@@ -1,0 +1,5 @@
+let f = fn void(x: int)
+  for (x in seq(0, 10))
+    print(x)
+
+f(10)

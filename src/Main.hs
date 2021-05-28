@@ -10,6 +10,7 @@ import           Text.Megaparsec         hiding ( State )
 import           Control.Monad.Trans
 import           Control.Monad.State.Strict
 import           Data.Functor.Identity
+import           Text.Show.Pretty
 
 data Args = FromFile { file' :: Maybe String } | ViaRepl
             deriving (Show, Data, Typeable)
@@ -32,24 +33,19 @@ ish =
 liftState :: State s a -> StateT s IO a
 liftState x = StateT (\s' -> return $ runIdentity (runStateT x s'))
 
-parseTestT
-  :: Show a
-  => Parser a
-  -> String
-  -> String
-  -> StateT ParserState IO ()
-parseTestT p name s = do
-  v <- liftState $ runParserT p name s
+parseTestT :: String -> String -> StateT ParserState IO ()
+parseTestT name s = do
+  v <- liftState $ runParserT pTopLevel name s
   case v of
     Left  e -> lift (putStr $ errorBundlePretty e)
-    Right x -> lift (print x)
+    Right x -> lift (pPrint $ fmap (const ()) x)
 
 fromFile :: Maybe String -> IO ()
 fromFile f = do
   (source, name) <- case f of
     Nothing   -> (,) <$> getContents <*> (return "(stdin)")
     Just path -> (,) <$> readFile path <*> (return path)
-  evalStateT (parseTestT pTopLevel name source) parserState0
+  evalStateT (parseTestT name source) parserState0
 
 viaRepl :: IO ()
 viaRepl = do
@@ -58,9 +54,8 @@ viaRepl = do
   loop = do
     minput <- getInputLine "> "
     case minput of
-      Nothing -> outputStrLn "Farewell."
-      Just input ->
-        (lift (parseTestT pTopLevel "(repl)" input)) >> loop
+      Nothing    -> outputStrLn "Farewell."
+      Just input -> (lift (parseTestT "(repl)" input)) >> loop
 
 main :: IO ()
 main = do

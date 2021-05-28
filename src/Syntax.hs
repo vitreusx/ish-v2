@@ -44,6 +44,7 @@ type Type = Type' SourcePos
 -- Stmt
 data Stmt' a =
   Let a [(Ident' a, Maybe (Type' a), Expr' a)]
+  | Assign a [(Ident' a, Expr' a)]
   | ExprStmt a [Expr' a]
   | If a (Expr' a) [Stmt' a]
   | IfElse a (Expr' a) [Stmt' a] [Stmt' a]

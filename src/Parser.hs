@@ -6,25 +6,20 @@ import           Lexer
 import           ParserDef
 import           Syntax
 import           Value
+import           Indent
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer    as Lex
 import           Control.Monad.Combinators.Expr ( makeExprParser )
-import           Control.Lens
 import           Control.Monad                  ( void )
 import           Control.Monad.State.Strict
+import           Control.Lens
 
 sp :: Parser SourcePos
 sp = getSourcePos
 
--- pTopLevel :: Parser TopLevel
--- pTopLevel =
---   TopLevel
---     <$> sp
---     <*> (Lex.nonIndented scn (Lex.indentBlock scn p) <* eof)
---   where p = return $ Lex.IndentMany Nothing return pStmt
 pTopLevel :: Parser TopLevel
-pTopLevel = TopLevel <$> sp <*> (pStmt `sepBy1` symbol ";")
+pTopLevel = TopLevel <$> sp <*> topLevel (block pStmt) <* eof
 
 reservedWords :: [String]
 reservedWords =
@@ -35,11 +30,15 @@ reservedWords =
   , "continue"
   , "break"
   , "fn"
-  , "true"
-  , "false"
   , "for"
   , "let"
+  , "in"
   ]
+
+reserved :: String -> Parser ()
+reserved s = do
+  try (symbol s)
+  return ()
 
 pIdent :: Parser Ident
 pIdent = try $ do
@@ -53,71 +52,58 @@ pIdent = try $ do
 
 pValue :: Parser Value
 pValue = choice
-  [ try (IntV <$> intLit)
-  , RealV <$> realLit
-  , StringV <$> stringLit
-  , try (symbol "true" *> (return $ BoolV True))
-  , try (symbol "false" *> (return $ BoolV False))
-  ]
-
-pScope' :: Parser a -> Parser b -> Parser (a, [b])
-pScope' header items = Lex.indentBlock scn p
- where
-  p = do
-    header' <- header
-    return $ Lex.IndentSome Nothing (return . (header', )) items
-
-pScope :: Parser a -> Parser (a, [Stmt])
-pScope header = pScope' header pStmt
+  [try (IntV <$> intLit), RealV <$> realLit, StringV <$> stringLit]
 
 pFnArg :: Parser (Ident, Type)
 pFnArg = do
   x <- pIdent
-  symbol ":"
+  reserved ":"
   t <- pType
   return (x, t)
 
 pFnDeclHead :: Parser ([Stmt] -> Expr)
 pFnDeclHead = do
   p <- sp
-  symbol "fn"
-  retType <- option Nothing (Just <$> pType)
-  args    <- parens $ pFnArg `sepBy` symbol ","
+  reserved "fn"
+  retType <- option Nothing (Just <$> (try pType))
+  args    <- parens (pFnArg `sepBy` symbol ",")
   return $ EFnDecl p retType args
 
 pFnDecl :: Parser Expr
-pFnDecl = do
-  (head, body) <- pScope pFnDeclHead
-  return (head body)
+pFnDecl = withBlock' ($) pFnDeclHead pStmt
+
+pApp :: Parser Expr
+pApp =
+  EApp <$> sp <*> pContExpr <*> parens (pExpr `sepBy` symbol ",")
+
+pContExpr :: Parser Expr
+pContExpr = choice
+  [parens pExpr, ELit <$> sp <*> pValue, EVar <$> sp <*> pIdent]
 
 pExprTerm :: Parser Expr
-pExprTerm = choice
-  [ parens pExpr
-  , ELit <$> sp <*> pValue
-  , EVar <$> sp <*> pIdent
-  , try pFnDecl
-  ]
+pExprTerm = choice [try pApp, pContExpr, try pFnDecl]
 
 pExpr :: Parser Expr
-pExpr = do
-  parserState <- get
-  let opTable' = parserState ^. opTable
-  makeExprParser pExprTerm opTable'
+pExpr = use opTable >>= makeExprParser pExprTerm
+
+pContType :: Parser Type
+pContType = choice [parens pType, Tyvar <$> sp <*> pIdent]
 
 pFnType :: Parser Type
 pFnType = do
   p <- sp
-  symbol "fn"
-  retType  <- pType
+  reserved "fn"
+  retType  <- pContType
   argTypes <- parens $ pType `sepBy` symbol ","
   return $ FnType p retType argTypes
 
 pType :: Parser Type
-pType = choice [Tyvar <$> sp <*> pIdent, pFnType]
+pType = choice [try pContType, pFnType]
 
 pStmt :: Parser Stmt
 pStmt = choice
   [ pLet
+  , try pAssign
   , ExprStmt <$> sp <*> (pExpr `sepBy1` symbol ",")
   , pIf
   , pIfElse
@@ -129,80 +115,86 @@ pStmt = choice
   ]
 
 pLet :: Parser Stmt
-pLet = do
+pLet = withPos $ do
   s <- sp
-  symbol "let"
+  reserved "let"
   letItems <- pLetItem `sepBy1` symbol ","
   return $ Let s letItems
 
 pLetItem :: Parser (Ident, Maybe Type, Expr)
 pLetItem = do
   x     <- pIdent
-  xType <- try $ option Nothing (symbol ":" >> (Just <$> pType))
-  symbol ":="
+  xType <- option Nothing (reserved ":" >> (Just <$> (try pType)))
+  reserved "="
   val <- pExpr
   return (x, xType, val)
+
+pAssign :: Parser Stmt
+pAssign = withPos $ Assign <$> sp <*> pAssignItem `sepBy1` symbol ","
+
+pAssignItem :: Parser (Ident, Expr)
+pAssignItem = do
+  x <- pIdent
+  reserved "="
+  val <- pExpr
+  return (x, val)
 
 pIfHead :: Parser (SourcePos, Expr)
 pIfHead = do
   s <- sp
-  symbol "if"
+  reserved "if"
   cond <- parens pExpr
   return (s, cond)
 
 pIf :: Parser Stmt
 pIf = do
-  ((s, cond), body) <- pScope pIfHead
+  ((s, cond), body) <- withBlock (,) pIfHead pStmt
   return $ If s cond body
 
 pElseHead :: Parser ()
-pElseHead = void $ symbol "else"
+pElseHead = void $ reserved "else"
 
 pIfElse :: Parser Stmt
 pIfElse = do
-  ((s, cond), then') <- pScope pIfHead
-  (_        , else') <- pScope pElseHead
+  ((s, cond), then') <- withBlock (,) pIfHead pStmt
+  else'              <- withBlock (flip const) pElseHead pStmt
   return $ IfElse s cond then' else'
 
 pForHead :: Parser ([Stmt] -> Stmt)
 pForHead = do
   s <- sp
-  symbol "for"
-  (x, seq) <- parens $ (,) <$> pIdent <*> pExpr
+  reserved "for"
+  (x, seq) <- parens $ (,) <$> pIdent <* reserved "in" <*> pExpr
   return $ For s x seq
 
 pFor :: Parser Stmt
-pFor = do
-  (head, body) <- pScope pForHead
-  return (head body)
+pFor = withBlock ($) pForHead pStmt
 
 pWhileHead :: Parser ([Stmt] -> Stmt)
 pWhileHead = do
   s <- sp
-  symbol "while"
+  reserved "while"
   cond <- parens pExpr
   return $ While s cond
 
 pWhile :: Parser Stmt
-pWhile = do
-  (head, body) <- pScope pWhileHead
-  return (head body)
+pWhile = withBlock ($) pWhileHead pStmt
 
 pBreak :: Parser Stmt
-pBreak = do
+pBreak = withPos $ do
   s <- sp
-  symbol "break"
+  reserved "break"
   return (Break s)
 
 pContinue :: Parser Stmt
-pContinue = do
+pContinue = withPos $ do
   s <- sp
-  symbol "continue"
+  reserved "continue"
   return (Continue s)
 
 pReturn :: Parser Stmt
-pReturn = do
+pReturn = withPos $ do
   s <- sp
-  symbol "return"
-  retVal <- option Nothing (Just <$> pExpr)
+  reserved "return"
+  retVal <- option Nothing (Just <$> (try pExpr))
   return $ Return s retVal

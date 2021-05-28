@@ -15,11 +15,8 @@ lineComment = Lex.skipLineComment "//"
 blockComment :: Parser ()
 blockComment = Lex.skipBlockComment "/*" "*/"
 
-scn :: Parser ()
-scn = Lex.space space1 lineComment blockComment
-
 sc :: Parser ()
-sc = Lex.space (void $ some $ char ' ') lineComment blockComment
+sc = Lex.space space1 lineComment blockComment
 
 lexeme :: Parser a -> Parser a
 lexeme = Lex.lexeme sc
