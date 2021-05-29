@@ -1,4 +1,5 @@
-{-# LANGUAGE TemplateHaskell, FlexibleInstances, FlexibleContexts, UndecidableInstances, RankNTypes #-}
+{-# LANGUAGE TemplateHaskell, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts, UndecidableInstances, RankNTypes #-}
 
 module Env where
 
@@ -12,37 +13,41 @@ import           Control.Monad.State
 import           Data.Maybe
 import           Control.Monad.Identity
 import           Syntax
+import           Data.List
+import           Control.Monad.Except
 
 type ScopeIdx = Integer
 type NameIdx = Integer
-type NameLoc = (ScopeIdx, NameIdx)
+type VarIdx = (ScopeIdx, NameIdx)
+
+data TypeIdx =
+  TyvarIdx NameIdx
+  | FnIdx NameIdx TypeIdx [TypeIdx]
+  deriving (Eq, Ord, Show)
+
+data TypePat =
+  Exact TypeIdx | Any | InferFn [TypeIdx]
 
 data VarEntry = VarEntry
-  { _varID       :: NameLoc
-  , _varName     :: Ident' ()
-  , _varDecl     :: Ident
-  , _varTypeID   :: NameLoc
-  , _varTypename :: Typename' ()
+  { _varID     :: VarIdx
+  , _varDecl   :: Ident
+  , _varTypeID :: TypeIdx
   }
   deriving (Eq, Ord, Show)
 
 data TypeEntry = TypeEntry
-  { _typeID   :: NameLoc
-  , _typename :: Typename' ()
+  { _typeID   :: TypeIdx
   , _typeDecl :: Typename
   , _typeval  :: Type
   }
   deriving (Eq, Ord, Show)
 
 data Scope = Scope
-  { _scopeIdx      :: ScopeIdx
-  , _vars          :: Map (Ident' ()) (Map NameLoc VarEntry)
-  , _freeVarIdx    :: NameIdx
-  , _types         :: Map (Typename' ()) TypeEntry
-  , _typeIdxLookup :: Map NameIdx (Typename' ())
-  , _freeTypeIdx   :: NameIdx
-  , _withinLoop    :: Bool
-  , _returnType    :: Maybe Type
+  { _scopeIdx   :: ScopeIdx
+  , _vars       :: [VarEntry]
+  , _freeVarIdx :: NameIdx
+  , _withinLoop :: Bool
+  , _returnType :: Maybe Type
   }
   deriving (Eq, Ord, Show)
 
@@ -50,37 +55,48 @@ data Env = Env
   { _scopes       :: Map ScopeIdx Scope
   , _freeScopeIdx :: ScopeIdx
   , _scopeStack   :: [ScopeIdx]
+  , _types        :: [TypeEntry]
+  , _freeTypeIdx  :: NameIdx
   }
   deriving (Eq, Ord, Show)
+
+data EnvError =
+  VarNotFound Ident
+  | VarIdxNotFound VarIdx
+  | AmbiguousType Ident
+  | TypeNotFound Typename
+  | TypeIdxNotFound TypeIdx
+
+class MonadError EnvError m => MonadEnv m where
+  enter, curScope :: Functor f => m (LensLike' f Env Scope)
+
+  declareT :: Typename -> Type -> m TypeEntry
+  nameLookupT :: Typename -> m TypeEntry
+  idLookupT :: TypeIdx -> m TypeEntry
+
+  declareV :: Ident -> Typename -> m VarEntry
+  nameLookupV :: (Ident, TypePat) -> m VarEntry
+  idLookupV :: VarIdx -> m VarEntry
+
+  leave :: m ()
 
 $(makeLenses ''VarEntry)
 $(makeLenses ''TypeEntry)
 $(makeLenses ''Scope)
 $(makeLenses ''Env)
 
-data TypePat =
-  Exact (Typename' ()) | InferReturn [Typename' ()]
-
-class MonadEnv m where
-  enter, curScope :: Functor f => m (LensLike' f Env Scope)
-
-  declareT :: Typename -> Type -> m TypeEntry
-  nameLookupT :: Typename' () -> m TypeEntry
-
-  declareV :: Ident -> Typename' () -> m VarEntry
-  nameLookupV :: (Ident' (), TypePat) -> m VarEntry
-
-  leave :: m ()
+matches :: TypePat -> TypeIdx -> Bool
+matches pat t = case (pat, t) of
+  (Any          , _               ) -> True
+  (Exact   t1   , t2              ) -> t1 == t2
+  (InferFn targs, FnIdx _ _ targs') -> targs == targs'
 
 newScope :: ScopeIdx -> Scope
-newScope idx = Scope { _vars          = Map.empty
-                     , _freeVarIdx    = 0
-                     , _types         = Map.empty
-                     , _freeTypeIdx   = 0
-                     , _withinLoop    = False
-                     , _returnType    = Nothing
-                     , _scopeIdx      = idx
-                     , _typeIdxLookup = Map.empty
+newScope idx = Scope { _vars       = []
+                     , _freeVarIdx = 0
+                     , _withinLoop = False
+                     , _returnType = Nothing
+                     , _scopeIdx   = idx
                      }
 
 subscope :: ScopeIdx -> Scope -> Scope
@@ -89,13 +105,12 @@ subscope idx s = (newScope idx) { _withinLoop = s ^. withinLoop
                                 }
 
 newEnv :: Env
-newEnv =
-  let zeroEnv = Env { _scopes       = Map.empty
-                    , _freeScopeIdx = 0
-                    , _scopeStack   = []
-                    }
-      enter' = enter :: State Env (LensLike' Identity Env Scope)
-  in  execState enter' zeroEnv
+newEnv = Env { _scopes       = Map.empty
+             , _freeScopeIdx = 0
+             , _scopeStack   = []
+             , _types        = []
+             , _freeTypeIdx  = 0
+             }
 
 type IsoLike' p f s a = p a (f a) -> p s (f s)
 
@@ -105,7 +120,10 @@ assumeExists
   => IsoLike' p f (Maybe a) a
 assumeExists = iso fromJust Just
 
-instance MonadState Env m => MonadEnv m where
+strip :: Functor f => f a -> f ()
+strip = fmap (const ())
+
+instance (MonadError EnvError m, MonadState Env m) => MonadEnv m where
   enter = do
     newScopeIdx' <- use freeScopeIdx
     scopeStack'  <- use scopeStack
@@ -126,22 +144,25 @@ instance MonadState Env m => MonadEnv m where
     return $ scopes . (at curScopeIdx) . assumeExists
 
   declareT t tval = do
-    scopeView <- curScope
-    scopeUse  <- curScope
+    typeIdx <- case t of
+      Tyvar _ _             -> TyvarIdx <$> use freeTypeIdx
+      FnTypename _ tr targs -> do
+        idx <- use freeTypeIdx
+        let typeidOf t' = do
+              ent <- nameLookupT t'
+              return (ent ^. typeID)
+        trIdx    <- typeidOf tr
+        targsIdx <- mapM typeidOf targs
+        return $ FnIdx idx trIdx targsIdx
 
-    typeIdx   <- use (scopeView . freeTypeIdx)
-    scopeIdx' <- use (scopeView . scopeIdx)
-    let stripped = fmap (const ()) t
-        entryVal = TypeEntry { _typeID   = (scopeIdx', typeIdx)
-                             , _typename = stripped
-                             , _typeDecl = t
-                             , _typeval  = tval
-                             }
-        entry = scopeUse . types . (at stripped)
+    let entry = TypeEntry { _typeID   = typeIdx
+                          , _typeDecl = t
+                          , _typeval  = tval
+                          }
 
-    scopeUse . freeTypeIdx %= (+ 1)
-    entry .= Just entryVal
-    return entryVal
+    freeTypeIdx %= (+ 1)
+    types %= (:) entry
+    return entry
 
   nameLookupT t = do
     case t of
@@ -149,86 +170,80 @@ instance MonadState Env m => MonadEnv m where
       FnTypename _ _ _ -> fnLookupT
    where
     tyvarLookupT = do
-      scopeStack' <- use scopeStack
-      found       <- mapM scopeLookupT scopeStack'
-      let Just closest = msum found
-      return closest
-    scopeLookupT scopeIdx = do
-      use $ scopes . (at scopeIdx) . assumeExists . types . (at t)
+      mentry <- tyvarLookupT'
+      case mentry of
+        Just entry -> return entry
+        Nothing    -> throwError $ TypeNotFound t
+    tyvarLookupT' = do
+      let filt tent = (strip (tent ^. typeDecl) == strip t)
+      types' <- use types
+      return $ find filt types'
     fnLookupT = do
+      mentry <- tyvarLookupT'
+      case mentry of
+        Just entry -> return entry
+        Nothing    -> genFuncT
+    genFuncT = do
       let FnTypename _ tr targs = t
-      tr'    <- nameLookupT tr
-      targs' <- mapM nameLookupT targs
+      let typevalOf t' = do
+            ent <- nameLookupT t'
+            return (ent ^. typeval)
+      trv    <- typevalOf tr
+      targsv <- mapM typevalOf targs
+      let tval = FnT trv targsv
+      declareT (fmap (const $ -1) t) tval
 
-      let globalIdx   = 0 :: ScopeIdx
-          globalScope = scopes . (at globalIdx) . assumeExists
-      globalScope' <- use $ scopes . (at globalIdx) . assumeExists
-      case globalScope' ^. types . (at t) of
-        Just v' -> return v'
-        Nothing -> do
-          let
-            typeIdx = globalScope' ^. freeTypeIdx
-            entry   = TypeEntry
-              { _typeID   = (globalIdx, typeIdx)
-              , _typename = t
-              , _typeDecl = fmap (const 0) t
-              , _typeval  = FnT (tr' ^. typeval)
-                                [ ta' ^. typeval | ta' <- targs' ]
-              }
-          globalScope . freeTypeIdx %= (+ 1)
-          globalScope . types . (at t) .= Just entry
-          return entry
+  idLookupT typeIdx = do
+    let matches ent = (ent ^. typeID == typeIdx)
+    ment <- uses types (find matches)
+    case ment of
+      Just ent -> return ent
+      Nothing  -> throwError $ TypeIdxNotFound typeIdx
 
   declareV name t = do
-    t'        <- nameLookupT t
-    scopeView <- curScope
     scopeUse  <- curScope
+    scopeMod  <- curScope
 
-    varIdx    <- use (scopeView . freeVarIdx)
-    scopeIdx' <- use (scopeView . scopeIdx)
-    let typeIdx   = t' ^. typeID
-        stripped  = fmap (const ()) name
-        overloads = scopeUse . vars . (at stripped) . (non Map.empty)
-        entryVal  = VarEntry { _varID       = (scopeIdx', varIdx)
-                             , _varName     = stripped
-                             , _varDecl     = name
-                             , _varTypeID   = typeIdx
-                             , _varTypename = t' ^. typename
-                             }
-        entry = overloads . (at typeIdx)
+    t'        <- nameLookupT t
+    varIdx    <- use (scopeUse . freeVarIdx)
+    scopeIdx' <- use (scopeUse . scopeIdx)
+    let typeIdx = t' ^. typeID
+        entry   = VarEntry { _varID     = (scopeIdx', varIdx)
+                           , _varDecl   = name
+                           , _varTypeID = typeIdx
+                           }
 
-    scopeUse . freeVarIdx %= (+ 1)
-    entry .= Just entryVal
-    return entryVal
+    scopeMod . freeVarIdx %= (+ 1)
+    scopeMod . vars %= (:) entry
+    return entry
 
-  nameLookupV (name, tpat) = do
+  nameLookupV (name, pat) = do
     scopeStack' <- use scopeStack
-    case tpat of
-      Exact t -> do
-        rt <- nameLookupT t
-        let typeIdx = rt ^. typeID
-        found <- mapM (exactLookupV typeIdx) scopeStack'
-        let Just closest = msum found
-        return closest
-      InferReturn targs -> do
-        found <- mapM (inferLookupV targs) scopeStack'
-        let all = concat found
-        case all of
-          [sole] -> return sole
+    matching    <- mapM extract scopeStack'
+    let flat = concat matching
+    case length flat of
+      0 -> throwError $ VarNotFound name
+      1 -> return (head flat)
+      _ -> throwError $ AmbiguousType name
    where
-    exactLookupV typeIdx scopeIdx = do
-      let scope     = scopes . (at scopeIdx) . assumeExists
-          overrides = scope . vars . (at name) . (non Map.empty)
-          entry     = overrides . (at typeIdx)
-      use entry
-    inferLookupV targs scopeIdx = do
-      scope <- use $ scopes . (at scopeIdx) . assumeExists
-      let overrides = scope ^. vars . (at name) . (non Map.empty)
-          match     = \v -> case v ^. varTypename of
-            FnTypename _ _ targs' -> targs == targs'
-            otherwise             -> False
-          matching = Map.elems $ Map.filter match overrides
-      return matching
+    extract scopeIdx = do
+      vars' <- use (scopes . (at scopeIdx) . assumeExists . vars)
+      let filt ent = do
+            t' <- typeofV ent
+            return (matches pat t')
+      filterM filt vars'
+    typeofV ent = do
+      let varTypeIdx = ent ^. varTypeID
+      tent <- idLookupT varTypeIdx
+      return (tent ^. typeID)
+
+  idLookupV (scopeIdx, nameIdx) = do
+    vars' <- use $ scopes . (at scopeIdx) . assumeExists . vars
+    let ment =
+          find (\ent -> ent ^. varID == (scopeIdx, nameIdx)) vars'
+    case ment of
+      Just ent -> return ent
+      Nothing  -> throwError $ VarIdxNotFound (scopeIdx, nameIdx)
 
   leave = do
     scopeStack %= tail
