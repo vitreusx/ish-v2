@@ -22,6 +22,9 @@ dependencies:
   - cmdargs
   - lens
   - pretty-show
+  - extra
+  - syb
+  - template-haskell
 
 executables:
   ish-v2:

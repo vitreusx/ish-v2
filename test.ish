@@ -1,4 +1,2 @@
-#[op 11 infixl <]
-
-let f = fn bool(x: int, y: int)
-  return x < y
+#[op 0 infixl |]
+let eith = lam *(t1: *, t2: *) (t1 | t2)

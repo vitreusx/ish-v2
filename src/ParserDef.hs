@@ -53,3 +53,15 @@ reconstructOpTable = do
         [ (prec, [op]) | (prec, op) <- opMap' ]
       unraveled = Map.elems grouped
   return unraveled
+
+setPos :: (FilePath, Pos, Pos) -> Parser ()
+setPos (file, line, col) = do
+  st <- getParserState
+  let curPosState = statePosState st
+      thPos       = SourcePos { sourceName   = file
+                              , sourceLine   = line
+                              , sourceColumn = col
+                              }
+      finPosState = curPosState { pstateSourcePos = thPos }
+      finState    = st { statePosState = curPosState }
+  setParserState st
