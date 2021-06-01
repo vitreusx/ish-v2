@@ -6,6 +6,9 @@ import           Syntax                  hiding ( Return
                                                 )
 import qualified Syntax                        as Syn
 import           VM
+import           Control.Lens
+import           Control.Monad.Cont
+import           Control.Monad.Except
 
 evalTL :: TopLevel -> Eval ()
 evalTL (TopLevel _ stmts) = do

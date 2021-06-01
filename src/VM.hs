@@ -5,13 +5,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module VM
-  ( module VM
-  , module Control.Lens
-  , module Control.Monad.Cont
-  , module Control.Monad.State
-  , module Control.Monad.Except
-  ) where
+module VM where
 
 import           Syntax                         ( Ptr
                                                 , Loc
@@ -66,6 +60,7 @@ data VMError =
   NotFound
   | InvalidType
   | PatternError String
+  deriving (Eq, Show)
 
 type Eval = ExceptT VMError (ContT () (StateT VM IO))
 
@@ -73,19 +68,19 @@ instance {-# OVERLAPS #-} Eq (Eval ()) where
   (==) _ _ = False
 
 instance {-# OVERLAPS #-} Show (Eval ()) where
-  show x = "... :: Eval ()"
+  show x = "(Eval ())"
 
 instance {-# OVERLAPS #-} Eq (Value -> Eval ()) where
   (==) _ _ = False
 
 instance {-# OVERLAPS #-} Show (Value -> Eval ()) where
-  show x = "... :: Value -> Eval ()"
+  show x = "(Value -> Eval ())"
 
 instance {-# OVERLAPS #-} Eq ([Value] -> Eval Value) where
   (==) _ _ = False
 
 instance {-# OVERLAPS #-} Show ([Value] -> Eval Value) where
-  show x = "... :: [Value] -> Eval Value"
+  show x = "([Value] -> Eval Value)"
 
 instance {-# OVERLAPS #-} MonadFail Eval where
   fail s = throwError (PatternError s)
@@ -93,6 +88,12 @@ instance {-# OVERLAPS #-} MonadFail Eval where
 $(makeLenses ''FnValue)
 $(makeLenses ''Env)
 $(makeLenses ''VM)
+
+env0 :: Env
+env0 = Env { _symbols = [] }
+
+vm0 :: VM
+vm0 = VM { _curEnv = env0, _memory = Map.empty, _freePtr = 0 }
 
 assumeEx
   :: (Profunctor p, Functor f)
@@ -122,6 +123,10 @@ v  `matches` Any  = True
 t  `matches` AnyT = (typeof t) == Kind
 t1 `matches` t2   = t1 == t2
 
+nameMatches :: Symbol -> Symbol -> Bool
+nameMatches (Var x1) (Var x2) = (Syn.nameof x1) == (Syn.nameof x2)
+nameMatches x        y        = x == y
+
 scoped :: Eval a -> Eval a
 scoped x = do
   env <- use curEnv
@@ -138,11 +143,11 @@ lookup x t = do
     Just (_, ptr) -> return $ memory . (at ptr) . assumeEx
  where
   matches' (x', ptr') = do
-    if x' /= x
-      then return False
-      else do
+    if nameMatches x' x
+      then do
         v <- use $ memory . (at ptr') . assumeEx
         return $ (typeof v) `matches` t
+      else return False
 
 declare :: Symbol -> Value -> Eval ()
 declare x v = do

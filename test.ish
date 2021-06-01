@@ -1,2 +1,0 @@
-#[op 0 infixl |]
-let eith = lam *(t1: *, t2: *) (t1 | t2)

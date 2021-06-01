@@ -23,10 +23,10 @@ executable ish-v2
       Eval
       Indent
       Intrin
+      IshDef
       Lexer
       Parser
       ParserDef
-      Quote
       Syntax
       VM
       Paths_ish_v2
@@ -41,6 +41,7 @@ executable ish-v2
     , lens
     , megaparsec
     , mtl
+    , neat-interpolation
     , parser-combinators
     , pretty-show
     , syb

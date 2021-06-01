@@ -36,10 +36,10 @@ stringLit :: Parser String
 stringLit = char '\"' *> manyTill Lex.charLiteral (char '\"')
 
 intLit :: Parser Integer
-intLit = Lex.signed sc (lexeme Lex.decimal)
+intLit = lexeme Lex.decimal
 
 realLit :: Parser Double
-realLit = Lex.signed sc (lexeme Lex.float)
+realLit = lexeme Lex.float
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")

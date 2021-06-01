@@ -24,6 +24,7 @@ ref = getOffset
 
 pTopLevel :: Parser TopLevel
 pTopLevel = topLevel $ do
+  sc
   r     <- ref
   items <- block ((Left <$> pStmt) <|> (Right <$> pDirective))
   eof

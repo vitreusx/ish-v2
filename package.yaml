@@ -25,6 +25,7 @@ dependencies:
   - extra
   - syb
   - template-haskell
+  - neat-interpolation
 
 executables:
   ish-v2:

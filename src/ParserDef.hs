@@ -6,7 +6,7 @@ import           Text.Megaparsec         hiding ( State
                                                 , ParseError
                                                 )
 import           Control.Monad.Combinators.Expr
-import           Control.Monad.State.Strict
+import           Control.Monad.State
 import           Data.Map.Strict               as Map
 import           Data.Void                      ( Void )
 import           Syntax
@@ -14,7 +14,7 @@ import           Control.Lens
 
 type IndentInfo = (Int, Int)
 
-data ParserState = ParserState
+data ParserEnv = ParserEnv
   { _opMap   :: [(Integer, Operator Parser Expr)]
   , _opTable :: [[Operator Parser Expr]]
   , _curRef  :: !IndentInfo
@@ -32,13 +32,13 @@ instance ShowErrorComponent ParseError where
         <> show ref
         <> ")"
 
-type Parser = ParsecT ParseError String (State ParserState)
+type Parser = ParsecT ParseError String (StateT ParserEnv IO)
 
-$(makeLenses ''ParserState)
+$(makeLenses ''ParserEnv)
 
-parserState0 :: ParserState
-parserState0 =
-  ParserState { _opMap = [], _opTable = [], _curRef = (1, 1) }
+parserEnv0 :: ParserEnv
+parserEnv0 =
+  ParserEnv { _opMap = [], _opTable = [], _curRef = (1, 1) }
 
 addOperator :: (Integer, Operator Parser Expr) -> Parser ()
 addOperator op = do
@@ -53,15 +53,3 @@ reconstructOpTable = do
         [ (prec, [op]) | (prec, op) <- opMap' ]
       unraveled = Map.elems grouped
   return unraveled
-
-setPos :: (FilePath, Pos, Pos) -> Parser ()
-setPos (file, line, col) = do
-  st <- getParserState
-  let curPosState = statePosState st
-      thPos       = SourcePos { sourceName   = file
-                              , sourceLine   = line
-                              , sourceColumn = col
-                              }
-      finPosState = curPosState { pstateSourcePos = thPos }
-      finState    = st { statePosState = curPosState }
-  setParserState st

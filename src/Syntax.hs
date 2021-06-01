@@ -21,7 +21,7 @@ deriving instance Ord a => Ord (TopLevel' a)
 deriving instance Show a => Show (TopLevel' a)
 
 -- Ident
-data Ident' a = Ident a String
+data Ident' a = Ident a String | IntrinName String
   deriving (Functor, Typeable, Data)
 type Ident = Ident' Attachment
 
@@ -73,3 +73,10 @@ type LetItem = LetItem' Attachment
 
 type AssignItem' a = (Ident' a, Expr' a)
 type AssignItem = AssignItem' Attachment
+
+instance Semigroup (TopLevel' a) where
+  (TopLevel p1 x1) <> (TopLevel p2 x2) = TopLevel p1 (x1 <> x2)
+
+nameof :: Ident' a -> String
+nameof (Ident p x   ) = x
+nameof (IntrinName x) = x
