@@ -3,27 +3,46 @@
 module Intrin where
 
 import           VM
-import           Syntax
+import           Parser
 import           NeatInterpolation
-import           IshDef
+import           Ish
 import           Text.Megaparsec.Pos
 import           Control.Lens
 import           Data.Text
 import           Control.Monad.IO.Class
 
-pIntrin :: Ish ()
-pIntrin = fromSource (initialPos "intrin") decls
- where
-  decls = unpack [text|
-// Intrinsic types
+intrinT :: String -> Value -> Ish ()
+intrinT x t = liftEval $ do
+  xlens <- VM.lookup (FromName x) AnyType
+  xlens .= t
+
+intrinF :: String -> Value -> ([Value] -> Eval Value) -> Ish ()
+intrinF x t f = liftEval $ do
+  xlens <- VM.lookup (FromName x) (ExactType t)
+  let
+    fnv =
+      FnValue { _fnType = t, _fnDef = Intrinsic f, _closure = mkEnv }
+  xlens .= FnV fnv
+
+typeFutures :: String
+typeFutures = unpack [text|
 future int: *
 future bool: *
 future string: *
 future void: *
+|]
 
-// Operators
-// Precedence levels taken from C++
-// Lower number -> higher precedence
+intrinTypes :: Ish ()
+intrinTypes = do
+  fromSource (initialPos "intrin-types") typeFutures
+
+  intrinT "int"    IntT
+  intrinT "bool"   BoolT
+  intrinT "string" StringT
+  intrinT "void"   VoidT
+
+funFutures :: String
+funFutures = unpack [text|
 #[op 3  prefix  +  ]
 future `+`:  fn int(int)
 #[op 3  prefix  -  ]
@@ -60,33 +79,15 @@ future `&&`: fn bool(bool, bool)
 #[op 15 infixl  || ]
 future `||`: fn bool(bool, bool)
 
-// Intrinsic functions
 future show: fn string(int)
 future show: fn string(bool)
 future print: fn void(string)
 future error: fn void(string)
 |]
 
-intrinT :: String -> Value -> Eval ()
-intrinT x t = do
-  xlens <- VM.lookup (Var $ IntrinName x) Kind
-  cloneLens xlens .= t
-
-intrinF :: String -> Value -> ([Value] -> Eval Value) -> Eval ()
-intrinF x t f = do
-  xlens <- VM.lookup (Var (IntrinName x)) t
-  let fnv = FnValue { _fnType  = t
-                    , _fnDef   = Intrinsic f
-                    , _closure = env0
-                    }
-  cloneLens xlens .= FnV fnv
-
-evalIntrin :: Eval ()
-evalIntrin = do
-  intrinT "int"    IntT
-  intrinT "bool"   BoolT
-  intrinT "string" StringT
-  intrinT "void"   VoidT
+intrinFun :: Ish ()
+intrinFun = do
+  fromSource (initialPos "intrin-futures") funFutures
 
   intrinF "+" (FnT IntT [IntT]) $ \[IntV n] -> return $ IntV (n)
   intrinF "-" (FnT IntT [IntT]) $ \[IntV n] -> return $ IntV (-n)
@@ -100,7 +101,7 @@ evalIntrin = do
     $ \[IntV n, IntV m] -> return $ IntV (n + m)
   intrinF "+" (FnT StringT [StringT, StringT])
     $ \[StringV s, StringV t] -> return $ StringV (s ++ t)
-  intrinF "-" (FnT IntT [IntT])
+  intrinF "-" (FnT IntT [IntT, IntT])
     $ \[IntV n, IntV m] -> return $ IntV (n - m)
   intrinF "<" (FnT BoolT [IntT, IntT])
     $ \[IntV n, IntV m] -> return $ BoolV (n < m)
@@ -132,11 +133,11 @@ evalIntrin = do
   intrinF "show" (FnT StringT [BoolT])
     $ \[BoolV p] -> return $ StringV (show p)
   intrinF "print" (FnT VoidT [StringT])
-    $ \[StringV s] -> liftIO $ print s >> return VoidV
+    $ \[StringV s] -> liftIO $ putStr s >> return VoidV
   intrinF "error" (FnT VoidT [StringT])
     $ \[StringV s] -> liftIO $ fail s >> return VoidV
 
 intrin :: Ish ()
 intrin = do
-  pIntrin
-  liftEval evalIntrin
+  intrinTypes
+  intrinFun

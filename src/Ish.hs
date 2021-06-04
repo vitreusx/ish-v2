@@ -1,8 +1,9 @@
 -- |
 
-module IshDef where
+module Ish where
 
 import           Parser
+import           Parsers
 import           VM
 import           Eval
 import           Control.Monad.State
@@ -61,11 +62,8 @@ liftEval x = do
         return (ret, vm)
       q = liftState' qf qg
 
-  mv <- liftCont' q p (runExceptT x)
-  case mv of
-    Left  e -> fail $ show e
-    Right v -> return v
+  liftCont' q p x
 
 runIsh :: Ish () -> IO ()
 runIsh x = do
-  evalStateT (runContT x return) (parserEnv0, vm0)
+  evalStateT (runContT x return) (mkParserEnv, mkVM)

@@ -21,12 +21,12 @@ executable ish-v2
   main-is: Main.hs
   other-modules:
       Eval
-      Indent
       Intrin
-      IshDef
+      Ish
+      Layout
       Lexer
       Parser
-      ParserDef
+      Parsers
       Syntax
       VM
       Paths_ish_v2

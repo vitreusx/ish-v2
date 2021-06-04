@@ -1,260 +1,72 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 
-module Parser
-  ( pTopLevel
-  , module ParserDef
-  , module Syntax
-  ) where
+module Parser where
 
-import           Lexer
-import           ParserDef
-import           Syntax
-import           Indent
-import           Text.Megaparsec
-import           Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer    as Lex
+import           Text.Megaparsec         hiding ( State
+                                                , ParseError
+                                                )
+import qualified Text.Megaparsec               as Mp
 import           Control.Monad.Combinators.Expr
-import           Control.Monad                  ( void )
-import           Control.Monad.State.Strict
+import           Control.Monad.State
+import           Data.Map.Strict               as Map
+import           Syntax
 import           Control.Lens
-import           Data.Either
+import qualified Data.Set                      as Set
 
-ref :: Parser Attachment
-ref = getOffset
+type Ref = Mp.State String ParseError
 
-pTopLevel :: Parser TopLevel
-pTopLevel = topLevel $ do
-  sc
-  r     <- ref
-  items <- block ((Left <$> pStmt) <|> (Right <$> pDirective))
-  eof
-  return $ TopLevel r (lefts items)
+instance {-# OVERLAPS #-} Show Ref where
+  show x = "[Ref]"
 
-reservedWords :: [String]
-reservedWords =
-  [ "if"
-  , "else"
-  , "return"
-  , "continue"
-  , "break"
-  , "fn"
-  , "lam"
-  , "for"
-  , "let"
-  , "in"
-  , "rec"
-  , "future"
-  ]
+type TopLevel = TopLevel' Ref
+type Ident = Ident' Ref
+type Expr = Expr' Ref
+type Stmt = Stmt' Ref
+type LetItem = LetItem' Ref
+type AssignItem = AssignItem' Ref
 
-reserved :: String -> Parser ()
-reserved s = void $ try (symbol s)
+ref :: Parser Ref
+ref = getParserState
 
-pDirective :: Parser ()
-pDirective = symbol "#" >> squareBrackets pOperatorDef
+type IndentInfo = (Int, Int)
 
-pOperatorDef :: Parser ()
-pOperatorDef = do
-  reserved "op"
-  prec <- intLit
-  op   <- pOperator
-  addOperator (prec, op)
+data ParserEnv = ParserEnv
+  { _opMap     :: [(Integer, Operator Parser Expr)]
+  , _opTable   :: [[Operator Parser Expr]]
+  , _refIndent :: IndentInfo
+  }
 
-pOperator :: Parser (Operator Parser Expr)
-pOperator =
-  choice [try pInfixl, try pInfixn, pInfixr, pPrefix, pPostfix]
+data ParseError =
+  IncorrectLine Int Int
+  | IncorrectIndent Ordering Int Int
+  deriving (Eq, Ord, Show)
 
-pInfixl :: Parser (Operator Parser Expr)
-pInfixl = pInfix "infixl" InfixL
+instance ShowErrorComponent ParseError where
+  showErrorComponent x = show x
 
-pInfixr :: Parser (Operator Parser Expr)
-pInfixr = pInfix "infixr" InfixR
+type Parser = ParsecT ParseError String (StateT ParserEnv IO)
 
-pInfixn :: Parser (Operator Parser Expr)
-pInfixn = pInfix "infixn" InfixN
+$(makeLenses ''ParserEnv)
 
-pInfix
-  :: String
-  -> (Parser (Expr -> Expr -> Expr) -> Operator Parser Expr)
-  -> Parser (Operator Parser Expr)
-pInfix sig ctor = do
-  symbol sig
-  op <- opIdent
-  return $ ctor (EInfix <$> ref <*> (Ident <$> ref <*> symbol op))
+mkParserEnv :: ParserEnv
+mkParserEnv =
+  ParserEnv { _opMap = [], _opTable = [], _refIndent = (1, 1) }
 
-pPrefix :: Parser (Operator Parser Expr)
-pPrefix = do
-  symbol "prefix"
-  op <- opIdent
-  return $ Prefix (EPrefix <$> ref <*> (Ident <$> ref <*> symbol op))
+addOperator :: (Integer, Operator Parser Expr) -> Parser ()
+addOperator op = do
+  opMap %= (:) op
+  opTable <~ reconstructOpTable
 
-pPostfix :: Parser (Operator Parser Expr)
-pPostfix = do
-  symbol "postfix"
-  op <- opIdent
-  return
-    $ Postfix (EPostfix <$> ref <*> (Ident <$> ref <*> symbol op))
+reconstructOpTable :: Parser [[Operator Parser Expr]]
+reconstructOpTable = do
+  opMap' <- use opMap
+  let grouped = Map.fromListWith
+        (++)
+        [ (prec, [op]) | (prec, op) <- opMap' ]
+      unraveled = Map.elems grouped
+  return unraveled
 
-pIdent :: Parser Ident
-pIdent = try $ do
-  r      <- ref
-  ident' <-
-    (try ident) <|> (between (symbol "`") (symbol "`") opIdent)
-  if ident' `elem` reservedWords
-    then do
-      fail $ "keyword " ++ (show ident') ++ " cannot be an identifier"
-    else do
-      return $ Ident r ident'
-
-pContExpr :: Parser Expr
-pContExpr = choice
-  [ parens pExpr
-  , ELitInt <$> ref <*> intLit
-  , ELitStr <$> ref <*> stringLit
-  , EVar <$> pIdent
-  , reserved "*" >> EKind <$> ref
-  ]
-
-pApp :: Parser Expr
-pApp =
-  EApp <$> ref <*> pContExpr <*> parens (pExpr `sepBy` symbol ",")
-
-pFnArg :: Parser (Ident, Expr)
-pFnArg = do
-  x <- pIdent
-  t <- (reserved ":" >> pExpr) <?> "type"
-  return (x, t)
-
-pFnDeclHead :: Parser ([Stmt] -> Expr)
-pFnDeclHead = do
-  r <- ref
-  reserved "fn"
-  retType <- pContExpr
-  args    <- parens (pFnArg `sepBy` symbol ",")
-  return $ EFnDecl r retType args
-
-pFnDecl :: Parser Expr
-pFnDecl = withBlock' ($) pFnDeclHead pStmt
-
-pLambda :: Parser Expr
-pLambda = do
-  r <- ref
-  reserved "lam"
-  retType <- pContExpr
-  args    <- parens (pFnArg `sepBy` symbol ",")
-  body    <- sameOrIndented >> pExpr
-  return $ ELam r retType args body
-
-pFnType :: Parser Expr
-pFnType = do
-  r <- ref
-  reserved "fn"
-  retType  <- pContExpr
-  argTypes <- parens $ pExpr `sepBy` symbol ","
-  return $ EFnType r retType argTypes
-
-pExprTerm :: Parser Expr
-pExprTerm =
-  choice [try pApp, pContExpr, try pFnType, pFnDecl, pLambda]
-
-pExpr :: Parser Expr
-pExpr = try $ do
-  table' <- use opTable
-  makeExprParser pExprTerm table'
-
-pStmt :: Parser Stmt
-pStmt = choice
-  [ pLet
-  , try pAssign
-  , try pIfElse
-  , pIf
-  , pWhile
-  , pBreak
-  , pContinue
-  , pReturn
-  , pFuture
-  , ExprStmt <$> (pExpr `sepBy1` symbol ",")
-  ]
-
-pLet :: Parser Stmt
-pLet = withPos $ do
-  r <- ref
-  reserved "let"
-  letItems <- pLetItem `sepBy1` symbol ","
-  return $ Let r letItems
-
-pLetItem :: Parser (Ident, Maybe Expr, Expr)
-pLetItem = do
-  x     <- pIdent
-  xType <- option Nothing (reserved ":" >> (Just <$> (try pExpr)))
-  reserved "="
-  val <- pExpr
-  return (x, xType, val)
-
-pAssign :: Parser Stmt
-pAssign =
-  withPos $ Assign <$> ref <*> pAssignItem `sepBy1` symbol ","
-
-pAssignItem :: Parser (Ident, Expr)
-pAssignItem = do
-  x <- pIdent
-  reserved "="
-  val <- pExpr
-  return (x, val)
-
-pIfHead :: Parser (Attachment, Expr)
-pIfHead = do
-  r <- ref
-  reserved "if"
-  cond <- parens pExpr
-  return (r, cond)
-
-pIf :: Parser Stmt
-pIf = do
-  ((r, cond), body) <- withBlock (,) pIfHead pStmt
-  return $ If r cond body
-
-pElseHead :: Parser ()
-pElseHead = void $ reserved "else"
-
-pIfElse :: Parser Stmt
-pIfElse = do
-  ((r, cond), then') <- withBlock (,) pIfHead pStmt
-  else'              <- withBlock (flip const) pElseHead pStmt
-  return $ IfElse r cond then' else'
-
-pWhileHead :: Parser ([Stmt] -> Stmt)
-pWhileHead = do
-  r <- ref
-  reserved "while"
-  cond <- parens pExpr
-  return $ While r cond
-
-pWhile :: Parser Stmt
-pWhile = withBlock ($) pWhileHead pStmt
-
-pBreak :: Parser Stmt
-pBreak = withPos $ do
-  r <- ref
-  reserved "break"
-  return (Break r)
-
-pContinue :: Parser Stmt
-pContinue = withPos $ do
-  r <- ref
-  reserved "continue"
-  return (Continue r)
-
-pReturn :: Parser Stmt
-pReturn = withPos $ do
-  r <- ref
-  reserved "return"
-  retVal <- option Nothing (Just <$> (try pExpr))
-  return $ Return r retVal
-
-pFuture :: Parser Stmt
-pFuture = withPos $ do
-  r <- ref
-  reserved "future"
-  x <- pIdent
-  t <- reserved ":" >> pExpr
-  return $ Future r x t
+throwParseError :: ParseError -> Parser a
+throwParseError e = fancyFailure (Set.singleton (ErrorCustom e))
