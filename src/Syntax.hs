@@ -29,8 +29,7 @@ data Expr' a =
   | EPrefix a (Ident' a) (Expr' a)
   | EInfix a (Ident' a) (Expr' a) (Expr' a)
   | EPostfix a (Ident' a) (Expr' a)
-  | EFnDecl a (Expr' a) [(Ident' a, Expr' a)] [Stmt' a]
-  | ELam a (Expr' a) [(Ident' a, Expr' a)] (Expr' a)
+  | EFnDecl a [(Ident' a, Expr' a)] [Stmt' a]
   | EFnType a (Expr' a) [Expr' a]
   deriving Functor
 

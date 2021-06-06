@@ -34,8 +34,8 @@ data FnValue = FnValue
 data Value =
   IntV Integer | StringV String | BoolV Bool | VoidV | FnV FnValue
   | IntT | StringT | VoidT | FnT Value [Value] | BoolT
-  | Kind | Phantom Value
-  | Jump (Eval ()) | ReturnJ (Value -> Eval ()) Value | JumpT
+  | Kind | Phantom Value | Universal
+  | Jump (Eval ()) | ReturnJ Value (Value -> Eval ()) | JumpT
   deriving (Eq, Show)
 
 data TypePat =
@@ -71,7 +71,7 @@ data VM = VM
 data VMError =
   NotFound SymbolPat TypePat
   | InvalidType Par.Expr TypePat
-  | NonVoidReturn Value
+  | InvalidReturn Value
   | PatternError String
   deriving (Eq, Show)
 
@@ -79,9 +79,7 @@ type Eval = ContT () (StateT VM IO)
 
 instance MonadError VMError Eval where
   throwError e = do
-    state <- get
-    let es = show state ++ "\n" ++ show e
-    liftIO (fail es)
+    liftIO (fail $ show e)
 
   catchError try _ = try
 
@@ -131,10 +129,12 @@ typeof (ReturnJ _ _) = JumpT
 typeof JumpT         = Kind
 
 typeMatches :: Value -> TypePat -> Bool
-typeMatches (FnT _ ta1) (FnPat     ta2) = ta1 == ta2
-typeMatches t1          (ExactType t2 ) = t1 == t2
-typeMatches t           AnyType         = typeof t == Kind
-
+typeMatches Universal   _                     = True
+typeMatches _           (ExactType Universal) = True
+typeMatches (FnT _ ta1) (FnPat     ta2      ) = ta1 == ta2
+typeMatches t1          (ExactType t2       ) = t1 == t2
+typeMatches t           AnyType               = typeof t == Kind
+typeMatches _           _                     = False
 symMatches :: Symbol -> SymbolPat -> Bool
 symMatches s1                 (ExactSym s2) = s1 == s2
 symMatches (Var (Ident _ x1)) (FromName x2) = x1 == x2

@@ -41,27 +41,26 @@ evalX (EApp _ f args) t = do
   vargs <- mapM (\a -> evalX a AnyType) args
   let ft = FnPat (map typeof vargs)
   FnV fv <- evalX f ft
-  let FnT ret' argtypes' = fv ^. fnType
+  let FnT ret argtypes' = fv ^. fnType
 
   case fv ^. fnDef of
-    Defined (EFnDecl _ fret fargs fbody) -> do
+    Defined (EFnDecl _ fargs fbody) -> do
       let argnames = [ name | (name, t) <- fargs ]
       scoped $ callCC $ \retcont -> do
         curEnv .= fv ^. closure
-        declare Return (ReturnJ retcont ret')
+        declare Return (ReturnJ ret retcont)
         mapM_ (\(x, v) -> declare (Var x) v) (zip argnames vargs)
         mapM_ evalSt                         fbody
         return VoidV
     Intrinsic f -> f vargs
 
-evalX (EPrefix r op e) t = evalX (EApp r (EVar op) [e]) t
+evalX (     EPrefix r op e      ) t = evalX (EApp r (EVar op) [e]) t
 evalX (EInfix r op e1 e2) t = evalX (EApp r (EVar op) [e1, e2]) t
-evalX (EPostfix r op e) t = evalX (EApp r (EVar op) [e]) t
+evalX (     EPostfix r op   e   ) t = evalX (EApp r (EVar op) [e]) t
 
-evalX decl@(EFnDecl _ ret args body) t = do
-  ret'     <- evalX ret AnyType
+evalX decl@(EFnDecl  _ args body) t = do
   argtypes <- mapM (\(argx, argt) -> evalX argt AnyType) args
-  let ft = FnT ret' argtypes
+  let ft = FnT Universal argtypes
   ctx <- use curEnv
   if ft `typeMatches` t
     then return $ FnV $ FnValue { _fnType  = ft
@@ -69,9 +68,6 @@ evalX decl@(EFnDecl _ ret args body) t = do
                                 , _closure = ctx
                                 }
     else throwError (InvalidType decl t)
-
-evalX (ELam p ret args e) t =
-  evalX (EFnDecl p ret args [Syn.Return p $ Just e]) t
 
 evalX x@(EFnType _ ret args) t = do
   vret  <- evalX ret AnyType
@@ -116,14 +112,14 @@ evalSt (Syn.Continue _) = do
 
 evalSt x@(Syn.Return _ me) = do
   vlens               <- VM.lookup (ExactSym Return) (ExactType JumpT)
-  ReturnJ ret retType <- use vlens
+  ReturnJ retType ret <- use vlens
 
   ve                  <- case me of
     Just e  -> evalX e (ExactType retType)
     Nothing -> do
-      if retType == VoidT
+      if VoidV `typeMatches` (ExactType retType)
         then return VoidV
-        else throwError (NonVoidReturn retType)
+        else throwError $ InvalidReturn retType
 
   ret ve
 

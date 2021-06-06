@@ -1,5 +1,6 @@
 module Layout where
 
+import           Lexer
 import           Parser
 import           Control.Monad.State
 import           Control.Lens
@@ -28,7 +29,7 @@ withBlock f a p = withPos (withBlock' f a p)
 
 withBlock' :: (a -> [b] -> c) -> Parser a -> Parser b -> Parser c
 withBlock' f a p = do
-  r1 <- a
+  r1 <- a <* scn
   r2 <- sameOrIndented >> block p
   return (f r1 r2)
 
@@ -66,7 +67,7 @@ checkIndent ref = do
 block :: Parser a -> Parser [a]
 block p = do
   blockRef <- snd <$> curIndent
-  some (checkIndent blockRef >> p)
+  some (checkIndent blockRef >> p <* scn)
 
 topLevel :: Parser a -> Parser a
 topLevel p = checkIndent 1 >> p

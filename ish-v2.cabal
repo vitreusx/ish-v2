@@ -26,7 +26,7 @@ executable ish-v2
       Layout
       Lexer
       Parser
-      Parsers
+      ParserDefs
       Syntax
       VM
       Paths_ish_v2

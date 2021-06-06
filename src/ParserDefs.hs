@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 
-module Parsers where
+module ParserDefs where
 
 import           Lexer
 import           Parser
@@ -88,10 +88,9 @@ pPostfix = do
     $ Postfix (EPostfix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pIdent :: Parser Ident
-pIdent = try $ do
+pIdent = do
   r      <- ref
-  ident' <-
-    (try ident) <|> (between (symbol "`") (symbol "`") opIdent)
+  ident' <- ident <|> (between (symbol "`") (symbol "`") opIdent)
   if ident' `elem` reservedWords
     then do
       fail $ "keyword " ++ (show ident') ++ " cannot be an identifier"
@@ -121,21 +120,11 @@ pFnDeclHead :: Parser ([Stmt] -> Expr)
 pFnDeclHead = do
   r <- ref
   reserved "fn"
-  retType <- pContExpr
-  args    <- parens (pFnArg `sepBy` symbol ",")
-  return $ EFnDecl r retType args
+  args <- parens (pFnArg `sepBy` symbol ",")
+  return $ EFnDecl r args
 
 pFnDecl :: Parser Expr
 pFnDecl = withBlock' ($) pFnDeclHead pStmt
-
-pLambda :: Parser Expr
-pLambda = do
-  r <- ref
-  reserved "lam"
-  retType <- pContExpr
-  args    <- parens (pFnArg `sepBy` symbol ",")
-  body    <- sameOrIndented >> pExpr
-  return $ ELam r retType args body
 
 pFnType :: Parser Expr
 pFnType = do
@@ -147,7 +136,7 @@ pFnType = do
 
 pExprTerm :: Parser Expr
 pExprTerm =
-  choice [try pApp, pContExpr, try pFnType, pFnDecl, pLambda]
+  try $ choice [try pFnDecl, try pFnType, try pApp, try pContExpr]
 
 pExpr :: Parser Expr
 pExpr = try $ do

@@ -3,7 +3,7 @@
 module Ish where
 
 import           Parser
-import           Parsers
+import           ParserDefs
 import           VM
 import           Eval
 import           Control.Monad.State

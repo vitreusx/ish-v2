@@ -1,6 +1,0 @@
-let f = fn void(x: int)
-  let g = fn void()
-    print(show(x) + "\n")
-
-let g = f(10)
-g()
