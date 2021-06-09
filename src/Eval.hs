@@ -18,9 +18,9 @@ evalTL (TopLevel _ stmts) = do
 
 evalLit :: Expr -> Value -> TypePat -> Eval Value
 evalLit e v t = do
-  if (typeof v) `typeMatches` t
-    then return v
-    else throwError (InvalidType e t)
+  unless ((typeof v) `typeMatches` t) $ do
+    throwError $ InvalidType e t
+  return v
 
 evalX :: Expr -> TypePat -> Eval Value
 
@@ -40,42 +40,83 @@ evalX (EVar (Ident _ x)) t = do
 evalX (EApp _ f args) t = do
   vargs <- mapM (\a -> evalX a AnyType) args
   let ft = FnPat (map typeof vargs)
-  FnV fv <- evalX f ft
-  let FnT ret argtypes' = fv ^. fnType
 
-  case fv ^. fnDef of
-    Defined (EFnDecl _ fargs fbody) -> do
-      let argnames = [ name | (name, t) <- fargs ]
-      scoped $ callCC $ \retcont -> do
-        curEnv .= fv ^. closure
-        declare Return (ReturnJ ret retcont)
-        mapM_ (\(x, v) -> declare (Var x) v) (zip argnames vargs)
-        mapM_ evalSt                         fbody
-        return VoidV
-    Intrinsic f -> f vargs
+  fv'        <- evalX f ft
+  typecheck' <- use $ curEnv . typecheck
+  if typecheck' || isPhantom fv' || any isPhantom vargs
+    then do
+      let retType = case fv' of
+            FnV     fv          -> let FnT ret _ = fv ^. fnType in ret
+            Phantom (FnT ret _) -> ret
+      return $ Phantom retType
+    else do
+      let FnV fv            = fv'
+          FnT ret argtypes' = fv ^. fnType
+      case fv ^. fnDef of
+        Defined (EFnDecl _ fargs fbody) -> do
+          let argnames = [ name | (name, t) <- fargs ]
+          scoped $ callCC $ \retcont -> do
+            curEnv .= fv ^. closure
+            declare Return (ReturnJ False ret retcont)
+            mapM_ (\(x, v) -> declare (Var x) v) (zip argnames vargs)
+            mapM_ evalSt                         fbody
+            return VoidV
+        Intrinsic f -> f vargs
 
 evalX (     EPrefix r op e      ) t = evalX (EApp r (EVar op) [e]) t
+
 evalX (EInfix r op e1 e2) t = evalX (EApp r (EVar op) [e1, e2]) t
+
 evalX (     EPostfix r op   e   ) t = evalX (EApp r (EVar op) [e]) t
 
 evalX decl@(EFnDecl  _ args body) t = do
-  argtypes <- mapM (\(argx, argt) -> evalX argt AnyType) args
-  let ft = FnT Universal argtypes
-  ctx <- use curEnv
-  if ft `typeMatches` t
-    then return $ FnV $ FnValue { _fnType  = ft
-                                , _fnDef   = Defined decl
-                                , _closure = ctx
-                                }
-    else throwError (InvalidType decl t)
+  argTypes <- mapM (\(x, a) -> evalX a AnyType) args
+
+  let retCont = const $ return ()
+  retJ <- case t of
+    ExactType (FnT retType _) -> do
+      return $ ReturnJ False retType retCont
+    _ -> do
+      ptr <- malloc
+      memory . (at ptr) .= Just VoidT
+      return $ ReturnJ True (Ref ptr) retCont
+
+  let ReturnJ _ retType _ = retJ
+
+  finalRet <- local' (curEnv . typecheck .~ True) $ scoped $ do
+    declare Return retJ
+    mapM_ (\((x, _), t) -> declare (Var x) (Phantom t))
+          (zip args argTypes)
+    mapM_ evalSt body
+    case retType of
+      Ref ptr -> use $ memory . (at ptr) . assumeEx
+      _       -> return retType
+
+  let ft = FnT finalRet argTypes
+  unless (ft `typeMatches` t) $ do
+    throwError (InvalidType decl t)
+
+  ctx <- use $ curEnv
+  return $ FnV $ FnValue { _fnType  = ft
+                         , _fnDef   = Defined decl
+                         , _closure = ctx
+                         }
 
 evalX x@(EFnType _ ret args) t = do
   vret  <- evalX ret AnyType
   vargs <- mapM (\a -> evalX a AnyType) args
   let fnt = FnT vret vargs
-  if (typeof fnt) `typeMatches` t
-    then return fnt
-    else throwError (InvalidType x t)
+  unless ((typeof fnt) `typeMatches` t) $ do
+    throwError (InvalidType x t)
+  return fnt
+
+local' :: MonadState s m => (s -> s) -> m a -> m a
+local' f x = do
+  prior <- get
+  put (f prior)
+  val <- x
+  put prior
+  return val
 
 evalSt :: Stmt -> Eval ()
 
@@ -86,42 +127,80 @@ evalSt (Assign _ items) = mapM_ evalAssign items
 evalSt (ExprStmt exprs) = mapM_ (\e -> evalX e AnyType) exprs
 
 evalSt (If _ cond body) = do
-  BoolV vcond <- evalX cond (ExactType BoolT)
-  when vcond $ scoped $ mapM_ evalSt body
+  typecheck' <- use $ curEnv . typecheck
+  if typecheck'
+    then do
+      evalX cond (ExactType BoolT)
+      scoped $ mapM_ evalSt body
+    else do
+      BoolV vcond <- evalX cond (ExactType BoolT)
+      when vcond $ scoped $ mapM_ evalSt body
 
 evalSt (IfElse _ cond then' else') = do
-  BoolV vcond <- evalX cond (ExactType BoolT)
-  if vcond
-    then scoped $ mapM_ evalSt then'
-    else scoped $ mapM_ evalSt else'
+  typecheck' <- use $ curEnv . typecheck
+  if typecheck'
+    then do
+      evalX cond (ExactType BoolT)
+      scoped $ mapM_ evalSt then'
+      scoped $ mapM_ evalSt else'
+    else do
+      BoolV vcond <- evalX cond (ExactType BoolT)
+      if vcond
+        then scoped $ mapM_ evalSt then'
+        else scoped $ mapM_ evalSt else'
 
 evalSt (While _ cond body) = do
   scoped $ callCC $ \brk -> do
     declare Break $ Jump (brk ())
-    evalWhile cond body
+    typecheck' <- use $ curEnv . typecheck
+    if typecheck'
+      then do
+        evalX cond (ExactType BoolT)
+        mapM_ evalSt body
+      else do
+        evalWhile cond body
 
 evalSt (Syn.Break _) = do
-  vlens    <- VM.lookup (ExactSym Break) (ExactType JumpT)
-  Jump brk <- use vlens
-  brk
+  vlens      <- VM.lookup (ExactSym Break) (ExactType JumpT)
+  Jump brk   <- use vlens
+
+  typecheck' <- use $ curEnv . typecheck
+  unless typecheck' $ brk
 
 evalSt (Syn.Continue _) = do
-  vlens     <- VM.lookup (ExactSym Continue) (ExactType JumpT)
-  Jump cont <- use $ vlens
-  cont
+  vlens      <- VM.lookup (ExactSym Continue) (ExactType JumpT)
+  Jump cont  <- use $ vlens
+
+  typecheck' <- use $ curEnv . typecheck
+  unless typecheck' $ cont
 
 evalSt x@(Syn.Return _ me) = do
-  vlens               <- VM.lookup (ExactSym Return) (ExactType JumpT)
-  ReturnJ retType ret <- use vlens
+  vlens <- VM.lookup (ExactSym Return) (ExactType JumpT)
+  ReturnJ incomplete retType ret <- use vlens
 
-  ve                  <- case me of
-    Just e  -> evalX e (ExactType retType)
-    Nothing -> do
-      if VoidV `typeMatches` (ExactType retType)
-        then return VoidV
-        else throwError $ InvalidReturn retType
+  ve <- case me of
+    Just e  -> evalX e AnyType
+    Nothing -> return VoidV
 
-  ret ve
+  typecheck' <- use $ curEnv . typecheck
+  if typecheck'
+    then do
+      if incomplete
+        then do
+          let Ref ptr = retType
+          memory . (at ptr) . assumeEx .= typeof ve
+          vlens2 <- VM.lookup (ExactSym Return) (ExactType JumpT)
+          vlens2 .= ReturnJ False (typeof ve) ret
+        else do
+          retType' <- case retType of
+            Ref ptr -> use $ memory . (at ptr) . assumeEx
+            _       -> return retType
+
+          unless ((typeof ve) `typeMatches` (ExactType retType')) $ do
+            throwError $ InvalidReturn x retType'
+    else do
+      ret ve
+
 
 evalSt (Future _ x t) = do
   vt <- evalX t AnyType

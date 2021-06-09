@@ -10,39 +10,37 @@ import           Text.Megaparsec.Pos
 import           Control.Lens
 import           Data.Text
 import           Control.Monad.IO.Class
+import           Control.Monad.State
 
-intrinT :: String -> Value -> Ish ()
-intrinT x t = liftEval $ do
+intrinV :: String -> Value -> Ish ()
+intrinV x t = liftEval $ do
   xlens <- VM.lookup (FromName x) AnyType
   xlens .= t
 
-intrinF :: String -> Value -> ([Value] -> Eval Value) -> Ish ()
-intrinF x t f = liftEval $ do
-  xlens <- VM.lookup (FromName x) (ExactType t)
-  let
-    fnv =
-      FnValue { _fnType = t, _fnDef = Intrinsic f, _closure = mkEnv }
-  xlens .= FnV fnv
-
-typeFutures :: String
-typeFutures = unpack [text|
+varFutures :: String
+varFutures = unpack [text|
 future int: *
 future bool: *
+future true: bool
+future false: bool
 future string: *
 future void: *
 |]
 
-intrinTypes :: Ish ()
-intrinTypes = do
-  fromSource (initialPos "intrin-types") typeFutures
+intrinVars :: Ish ()
+intrinVars = do
+  fromSource (initialPos "intrin-vars") varFutures
 
-  intrinT "int"    IntT
-  intrinT "bool"   BoolT
-  intrinT "string" StringT
-  intrinT "void"   VoidT
+  intrinV "int"    IntT
+  intrinV "bool"   BoolT
+  intrinV "true"   (BoolV True)
+  intrinV "false"  (BoolV False)
+  intrinV "string" StringT
+  intrinV "void"   VoidT
 
-funFutures :: String
-funFutures = unpack [text|
+
+fnFutures :: String
+fnFutures = unpack [text|
 #[op 3  prefix  +  ]
 future `+`:  fn int(int)
 #[op 3  prefix  -  ]
@@ -83,11 +81,21 @@ future show: fn string(int)
 future show: fn string(bool)
 future print: fn void(string)
 future error: fn void(string)
+future typeof: fn string(string)
+future valof: fn string(string)
 |]
 
-intrinFun :: Ish ()
-intrinFun = do
-  fromSource (initialPos "intrin-futures") funFutures
+intrinF :: String -> Value -> ([Value] -> Eval Value) -> Ish ()
+intrinF x t f = liftEval $ do
+  let
+    fnv =
+      FnValue { _fnType = t, _fnDef = Intrinsic f, _closure = mkEnv }
+  xlens <- VM.lookup (FromName x) (ExactType t)
+  xlens .= FnV fnv
+
+intrinFns :: Ish ()
+intrinFns = do
+  fromSource (initialPos "intrin-fn") fnFutures
 
   intrinF "+" (FnT IntT [IntT]) $ \[IntV n] -> return $ IntV (n)
   intrinF "-" (FnT IntT [IntT]) $ \[IntV n] -> return $ IntV (-n)
@@ -136,8 +144,16 @@ intrinFun = do
     $ \[StringV s] -> liftIO $ putStr s >> return VoidV
   intrinF "error" (FnT VoidT [StringT])
     $ \[StringV s] -> liftIO $ fail s >> return VoidV
+  intrinF "typeof" (FnT StringT [StringT]) $ \[StringV x] -> do
+    vlens <- VM.lookup (FromName x) AnyType
+    v     <- use $ cloneLens vlens
+    return $ StringV (show $ typeof v)
+  intrinF "valof" (FnT StringT [StringT]) $ \[StringV x] -> do
+    vlens <- VM.lookup (FromName x) AnyType
+    v     <- use $ cloneLens vlens
+    return $ StringV (show v)
 
 intrin :: Ish ()
 intrin = do
-  intrinTypes
-  intrinFun
+  intrinVars
+  intrinFns

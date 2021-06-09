@@ -18,6 +18,7 @@ import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
 import           Data.Maybe
 import           Text.Megaparsec
+import           Data.List
 
 data FuncDef =
   Defined Par.Expr
@@ -34,8 +35,8 @@ data FnValue = FnValue
 data Value =
   IntV Integer | StringV String | BoolV Bool | VoidV | FnV FnValue
   | IntT | StringT | VoidT | FnT Value [Value] | BoolT
-  | Kind | Phantom Value | Universal
-  | Jump (Eval ()) | ReturnJ Value (Value -> Eval ()) | JumpT
+  | Kind | Phantom Value | Ref Ptr
+  | Jump (Eval ()) | ReturnJ Bool Value (Value -> Eval ()) | JumpT
   deriving (Eq, Show)
 
 data TypePat =
@@ -57,7 +58,8 @@ data Symbol =
   deriving (Eq, Show)
 
 data Env = Env
-  { _symbols :: [(Symbol, Ptr)]
+  { _symbols   :: [(Symbol, Ptr)]
+  , _typecheck :: Bool
   }
   deriving (Eq, Show)
 
@@ -71,7 +73,7 @@ data VM = VM
 data VMError =
   NotFound SymbolPat TypePat
   | InvalidType Par.Expr TypePat
-  | InvalidReturn Value
+  | InvalidReturn Par.Stmt Value
   | PatternError String
   deriving (Eq, Show)
 
@@ -106,39 +108,42 @@ $(makeLenses ''Env)
 $(makeLenses ''VM)
 
 mkEnv :: Env
-mkEnv = Env { _symbols = [] }
+mkEnv = Env { _symbols = [], _typecheck = False }
 
 mkVM :: VM
 mkVM = VM { _curEnv = mkEnv, _memory = Map.empty, _freePtr = 0 }
 
 typeof :: Value -> Value
-typeof (IntV    _)   = IntT
-typeof (StringV _)   = StringT
-typeof (BoolV   _)   = BoolT
-typeof VoidV         = VoidT
-typeof (FnV fnv)     = fnv ^. fnType
-typeof IntT          = Kind
-typeof StringT       = Kind
-typeof VoidT         = Kind
-typeof (FnT _ _)     = Kind
-typeof BoolT         = Kind
-typeof Kind          = Kind
-typeof (Phantom t  ) = t
-typeof (Jump    _  ) = JumpT
-typeof (ReturnJ _ _) = JumpT
-typeof JumpT         = Kind
+typeof (IntV    _)     = IntT
+typeof (StringV _)     = StringT
+typeof (BoolV   _)     = BoolT
+typeof VoidV           = VoidT
+typeof (FnV fnv)       = fnv ^. fnType
+typeof IntT            = Kind
+typeof StringT         = Kind
+typeof VoidT           = Kind
+typeof (FnT _ _)       = Kind
+typeof BoolT           = Kind
+typeof Kind            = Kind
+typeof (Phantom t    ) = t
+typeof (Jump    _    ) = JumpT
+typeof (ReturnJ _ _ _) = JumpT
+typeof JumpT           = Kind
 
 typeMatches :: Value -> TypePat -> Bool
-typeMatches Universal   _                     = True
-typeMatches _           (ExactType Universal) = True
-typeMatches (FnT _ ta1) (FnPat     ta2      ) = ta1 == ta2
-typeMatches t1          (ExactType t2       ) = t1 == t2
-typeMatches t           AnyType               = typeof t == Kind
-typeMatches _           _                     = False
+typeMatches (FnT _ ta1) (FnPat     ta2) = ta1 == ta2
+typeMatches t1          (ExactType t2 ) = t1 == t2
+typeMatches t           AnyType         = typeof t == Kind
+typeMatches _           _               = False
+
 symMatches :: Symbol -> SymbolPat -> Bool
 symMatches s1                 (ExactSym s2) = s1 == s2
 symMatches (Var (Ident _ x1)) (FromName x2) = x1 == x2
 symMatches _                  _             = False
+
+isPhantom :: Value -> Bool
+isPhantom (Phantom _) = True
+isPhantom _           = False
 
 assumeEx
   :: (Profunctor p, Functor f)
@@ -171,7 +176,12 @@ lookup xpat tpat = do
 
 declare :: Symbol -> Value -> Eval ()
 declare x v = do
-  xPtr <- use freePtr
+  xPtr <- malloc
   curEnv . symbols %= (:) (x, xPtr)
   memory . (at xPtr) .= Just v
+
+malloc :: Eval Ptr
+malloc = do
+  xPtr <- use freePtr
   freePtr += 1
+  return xPtr

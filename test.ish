@@ -1,0 +1,12 @@
+let f = fn(x: int)
+  let g = fn()
+    x = x + 1
+    print(show(x) + "\n")
+  return g
+
+let g1 = f(0), g2 = f(0)
+g1()
+g2()
+g1()
+g1()
+g2()

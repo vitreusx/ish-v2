@@ -187,7 +187,7 @@ pIfHead :: Parser (Ref, Expr)
 pIfHead = do
   r <- ref
   reserved "if"
-  cond <- parens pExpr
+  cond <- pExpr
   return (r, cond)
 
 pIf :: Parser Stmt
@@ -208,7 +208,7 @@ pWhileHead :: Parser ([Stmt] -> Stmt)
 pWhileHead = do
   r <- ref
   reserved "while"
-  cond <- parens pExpr
+  cond <- pExpr
   return $ While r cond
 
 pWhile :: Parser Stmt
