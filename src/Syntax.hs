@@ -24,12 +24,13 @@ data Expr' a =
   ELitInt a Integer
   | ELitStr a String
   | EKind a
+  | ERecur a
   | EVar (Ident' a)
   | EApp a (Expr' a) [Expr' a]
   | EPrefix a (Ident' a) (Expr' a)
   | EInfix a (Ident' a) (Expr' a) (Expr' a)
   | EPostfix a (Ident' a) (Expr' a)
-  | EFnDecl a [(Ident' a, Expr' a)] [Stmt' a]
+  | EFnDecl a (Maybe (Expr' a)) [(Ident' a, Expr' a)] [Stmt' a]
   | EFnType a (Expr' a) [Expr' a]
   deriving Functor
 

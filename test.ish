@@ -1,12 +1,13 @@
-let f = fn(x: int)
-  let g = fn()
-    x = x + 1
-    print(show(x) + "\n")
-  return g
+let fib = fn [int](n: int)
+  if n < 2
+    return n
+  else
+    return rec(n-1) + rec(n-2)
 
-let g1 = f(0), g2 = f(0)
-g1()
-g2()
-g1()
-g1()
-g2()
+let fact = fn [int](n: int)
+  if n == 0
+    return 1
+  else
+    return n*rec(n-1)
+
+print(show(fact(10)) + "\n")

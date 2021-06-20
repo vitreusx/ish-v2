@@ -1,0 +1,30 @@
+# Ish-v2 language
+
+## Installation
+
+Using `make` should be sufficient.
+
+**WARNING** It locally (locally as in for the user) installs `stack` and the requisite packages, which include `megaparsec` and `lens`, so the compilation process, or rather loading the packages before the compilation process, may take some time. I therefore provide a compiled executable along with the source code. It's not impossible for some shared libraries to be missing, though.
+
+If that doesn't work, `./stack run` should work.
+
+## Files
+
+- `src/Main.hs`, the main file;
+- `src/Syntax.hs`, the AST of the program;
+- `src/Parser.hs`, the definition of the `Parser` type + some other stuff;
+- `src/Lexer.hs`, the lexer;
+- `src/Layout.hs`, tools for indentation-sensitive parsing;
+- `src/ParserDefs.hs`, parsers of the AST elements and parser directives (more on that later);
+- `src/VM.hs`, the definitions of an evaluation environment ("a virtual machine", if you will);
+- `src/Eval.hs`, interpreter _proper_, i.e. a set of functions which parse AST into `Eval` instances;
+- `src/Intrin.hs`, intrinsic types and functions;
+- `src/Ish.hs`, definition and lifting of `Parser` and `Eval` into a common monad.
+
+## Features
+
+### Custom parser
+
+Because of the difficulties in achieving a proper layout in BNFC, I decided to implement the parser myself in `megaparsec`; it also allowed me to add a feature of _custom operators_ (kinda like in Haskell). This also allowed me to implement the intrinsic operators quite elegantly (if I can say so myself), see `src/Intrin.hs` for the definitions of intrinsic values, types and functions.
+
+###

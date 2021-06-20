@@ -15,7 +15,7 @@ license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
-    README.md
+    README
 
 executable ish-v2
   main-is: Main.hs

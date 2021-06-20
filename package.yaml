@@ -1,15 +1,15 @@
-name:                ish-v2
-version:             0.1.0.0
+name: ish-v2
+version: 0.1.0.0
 #synopsis:
 #description:
-homepage:            https://github.com/githubuser/ish-v2#readme
-license:             BSD3
-author:              Jakub Bednarz
-maintainer:          jb406103@students.mimuw.edu.pl
-copyright:           2021 Jakub Bednarz
-category:            Web
+homepage: https://github.com/githubuser/ish-v2#readme
+license: BSD3
+author: Jakub Bednarz
+maintainer: jb406103@students.mimuw.edu.pl
+copyright: 2021 Jakub Bednarz
+category: Web
 extra-source-files:
-- README.md
+  - README
 
 dependencies:
   - base >= 4.7 && < 5
@@ -29,5 +29,5 @@ dependencies:
 
 executables:
   ish-v2:
-    source-dirs:      src
-    main:             Main.hs
+    source-dirs: src
+    main: Main.hs

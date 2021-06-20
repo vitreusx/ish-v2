@@ -54,7 +54,7 @@ type Ptr = Int
 
 data Symbol =
   Var Par.Ident
-  | Return | Break | Continue
+  | Return | Break | Continue | Recur
   deriving (Eq, Show)
 
 data Env = Env

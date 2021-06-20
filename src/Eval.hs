@@ -11,6 +11,7 @@ import           Control.Lens
 import           Control.Monad.Cont
 import           Control.Monad.Except
 import           Control.Monad.State
+import           Data.Maybe
 
 evalTL :: TopLevel -> Eval ()
 evalTL (TopLevel _ stmts) = do
@@ -33,6 +34,10 @@ evalX e@(ELitStr _ s) t = do
 evalX e@(EKind _) t = do
   evalLit e Kind t
 
+evalX e@(ERecur _) t = do
+  vlens <- VM.lookup (ExactSym Recur) t
+  use $ cloneLens vlens
+
 evalX (EVar (Ident _ x)) t = do
   vlens <- VM.lookup (FromName x) t
   use $ cloneLens vlens
@@ -53,38 +58,52 @@ evalX (EApp _ f args) t = do
       let FnV fv            = fv'
           FnT ret argtypes' = fv ^. fnType
       case fv ^. fnDef of
-        Defined (EFnDecl _ fargs fbody) -> do
+        Defined (EFnDecl _ _ fargs fbody) -> do
           let argnames = [ name | (name, t) <- fargs ]
           scoped $ callCC $ \retcont -> do
             curEnv .= fv ^. closure
             declare Return (ReturnJ False ret retcont)
+            declare Recur  fv'
             mapM_ (\(x, v) -> declare (Var x) v) (zip argnames vargs)
             mapM_ evalSt                         fbody
             return VoidV
         Intrinsic f -> f vargs
 
-evalX (     EPrefix r op e      ) t = evalX (EApp r (EVar op) [e]) t
+evalX (EPrefix r op e) t = evalX (EApp r (EVar op) [e]) t
 
 evalX (EInfix r op e1 e2) t = evalX (EApp r (EVar op) [e1, e2]) t
 
-evalX (     EPostfix r op   e   ) t = evalX (EApp r (EVar op) [e]) t
+evalX (EPostfix r op e) t = evalX (EApp r (EVar op) [e]) t
 
-evalX decl@(EFnDecl  _ args body) t = do
-  argTypes <- mapM (\(x, a) -> evalX a AnyType) args
+evalX decl@(EFnDecl _ declRetType args body) t = do
+  argTypes      <- mapM (\(x, a) -> evalX a AnyType) args
+  prelimRetType <- case declRetType of
+    Nothing -> do
+      case t of
+        ExactType (FnT retType _) -> return $ Just retType
+        _                         -> return Nothing
+    Just declRetType' -> do
+      rt <- evalX declRetType' AnyType
+      unless (rt `typeMatches` t) $ do
+        throwError $ InvalidType declRetType' t
+      return $ Just rt
 
   let retCont = const $ return ()
-  retJ <- case t of
-    ExactType (FnT retType _) -> do
-      return $ ReturnJ False retType retCont
-    _ -> do
+  retJ <- case prelimRetType of
+    Just rt -> do
+      return $ ReturnJ False rt retCont
+    Nothing -> do
       ptr <- malloc
       memory . (at ptr) .= Just VoidT
       return $ ReturnJ True (Ref ptr) retCont
 
   let ReturnJ _ retType _ = retJ
 
-  finalRet <- local' (curEnv . typecheck .~ True) $ scoped $ do
+  finalRet <- local' (curEnv . typecheck .= True) $ scoped $ do
     declare Return retJ
+    when (isJust prelimRetType) $ do
+      declare Recur $ Phantom (FnT retType argTypes)
+
     mapM_ (\((x, _), t) -> declare (Var x) (Phantom t))
           (zip args argTypes)
     mapM_ evalSt body
@@ -110,10 +129,10 @@ evalX x@(EFnType _ ret args) t = do
     throwError (InvalidType x t)
   return fnt
 
-local' :: MonadState s m => (s -> s) -> m a -> m a
-local' f x = do
+local' :: MonadState s m => m a -> m b -> m b
+local' s x = do
   prior <- get
-  put (f prior)
+  s
   val <- x
   put prior
   return val

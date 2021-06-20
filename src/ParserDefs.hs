@@ -32,11 +32,11 @@ reservedWords =
   , "continue"
   , "break"
   , "fn"
-  , "lam"
   , "for"
   , "let"
   , "in"
   , "future"
+  , "rec"
   ]
 
 reserved :: String -> Parser ()
@@ -71,19 +71,19 @@ pInfix
   -> Parser (Operator Parser Expr)
 pInfix sig ctor = do
   symbol sig
-  op <- opIdent
+  op <- try opIdent
   return $ ctor (EInfix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pPrefix :: Parser (Operator Parser Expr)
 pPrefix = do
   symbol "prefix"
-  op <- opIdent
+  op <- try opIdent
   return $ Prefix (EPrefix <$> ref <*> (Ident <$> ref <*> symbol op))
 
 pPostfix :: Parser (Operator Parser Expr)
 pPostfix = do
   symbol "postfix"
-  op <- opIdent
+  op <- try opIdent
   return
     $ Postfix (EPostfix <$> ref <*> (Ident <$> ref <*> symbol op))
 
@@ -102,8 +102,9 @@ pContExpr = choice
   [ parens pExpr
   , ELitInt <$> ref <*> intLit
   , ELitStr <$> ref <*> stringLit
+  , (EKind <$> ref) <* try (reserved "*")
+  , (ERecur <$> ref) <* try (reserved "rec")
   , EVar <$> pIdent
-  , reserved "*" >> EKind <$> ref
   ]
 
 pApp :: Parser Expr
@@ -120,8 +121,9 @@ pFnDeclHead :: Parser ([Stmt] -> Expr)
 pFnDeclHead = do
   r <- ref
   reserved "fn"
-  args <- parens (pFnArg `sepBy` symbol ",")
-  return $ EFnDecl r args
+  retType <- option Nothing (Just <$> squareBrackets pExpr)
+  args    <- parens (pFnArg `sepBy` symbol ",")
+  return $ EFnDecl r retType args
 
 pFnDecl :: Parser Expr
 pFnDecl = withBlock' ($) pFnDeclHead pStmt
@@ -146,7 +148,6 @@ pExpr = try $ do
 pStmt :: Parser Stmt
 pStmt = choice
   [ pLet
-  , try pAssign
   , try pIfElse
   , pIf
   , pWhile
@@ -154,6 +155,7 @@ pStmt = choice
   , pContinue
   , pReturn
   , pFuture
+  , try pAssign
   , ExprStmt <$> (pExpr `sepBy1` symbol ",")
   ]
 
@@ -196,7 +198,7 @@ pIf = do
   return $ If r cond body
 
 pElseHead :: Parser ()
-pElseHead = void $ reserved "else"
+pElseHead = reserved "else"
 
 pIfElse :: Parser Stmt
 pIfElse = do
@@ -227,7 +229,7 @@ pContinue = withPos $ do
   return (Continue r)
 
 pReturn :: Parser Stmt
-pReturn = withPos $ do
+pReturn = do
   r <- ref
   reserved "return"
   retVal <- option Nothing (Just <$> (try pExpr))

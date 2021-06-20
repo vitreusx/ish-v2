@@ -11,6 +11,7 @@ import           Text.Megaparsec         hiding ( State )
 import           Text.Show.Pretty
 import           Control.Monad.Except
 import           Control.Monad.Cont
+import           Control.Lens
 
 type Ish = ContT () (StateT (ParserEnv, VM) IO)
 
@@ -60,9 +61,11 @@ liftEval x = do
       qg x = do
         (ret, (_, vm)) <- x
         return (ret, vm)
-      q = liftState' qf qg
-
-  liftCont' q p x
+      q  = liftState' qf qg
+      x' = do
+        local' (curEnv . typecheck .= True) x
+        x
+  liftCont' q p x'
 
 runIsh :: Ish () -> IO ()
 runIsh x = do
