@@ -1,0 +1,7 @@
+~ Here `x` will be declared but `x: string` not.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+let x = 5
+x = "s"

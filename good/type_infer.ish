@@ -1,0 +1,13 @@
+~ Here, we will show an example for type inference
+~ and how it simplifies function declarations
+
+let f1 = fn(x: int)
+  let f2 = fn(y: string)
+    let f3 = fn(z: bool)
+      return show(x) + " " + y + " " + show(z)
+    return f3
+  return f2
+
+~ `typeof` returns a representation (string) of
+~ a type associated with a particular name.
+print(typeof("f1") + "\n")

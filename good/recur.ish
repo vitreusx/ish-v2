@@ -1,0 +1,17 @@
+~ A recursion test for standard fibonacci and
+~ factorial functions.
+
+let fib = fn [int](n: int)
+  if n < 2
+    return n
+  else
+    return rec(n-1) + rec(n-2)
+
+let fact = fn [int](n: int)
+  if n == 0
+    return 1
+  else
+    return n*rec(n-1)
+
+let a = fib(20), b = fact(10)
+print(show(a) + " " + show(b) + "\n")

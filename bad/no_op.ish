@@ -1,0 +1,4 @@
+~ We shall use an undefined operator.
+
+if x @ y == 1
+  print(x + y)

@@ -75,6 +75,7 @@ data VMError =
   | InvalidType Par.Expr TypePat
   | InvalidReturn Par.Stmt Value
   | PatternError String
+  | DivisionByZero
   deriving (Eq, Show)
 
 type Eval = ContT () (StateT VM IO)

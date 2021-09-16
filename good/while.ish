@@ -1,0 +1,13 @@
+~ Here we demonstrate use of `while` with
+~ `break` and `continue`.
+
+let f = fn(n: int)
+  let cnt = 0
+  while true
+    cnt = cnt + 1
+    if (cnt > n) break
+    if (cnt % 2 == 0) continue
+    print(show(cnt) + " ")
+  print("\n")
+
+f(15)

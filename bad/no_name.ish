@@ -1,0 +1,6 @@
+~ `x` has not been declared at all.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+x

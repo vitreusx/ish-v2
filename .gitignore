@@ -1,2 +1,8 @@
 .stack-work
 stack.yaml.lock
+stack-*
+interpreter
+jakub_bednarz.zip
+*.tar.gz
+stack
+test.ish

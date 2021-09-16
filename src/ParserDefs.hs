@@ -185,7 +185,7 @@ pAssignItem = do
   val <- pExpr
   return (x, val)
 
-pIfHead :: Parser (Ref, Expr)
+pIfHead :: Parser (SRef, Expr)
 pIfHead = do
   r <- ref
   reserved "if"

@@ -1,0 +1,13 @@
+~ Here we shall see static scope binding in action.
+
+let x = 1
+
+let f = fn (a: int)
+  return x + a
+
+let g = fn ()
+  let x = 2
+  return f(0)
+
+~ This should print 1
+print(show(g()) + "\n")

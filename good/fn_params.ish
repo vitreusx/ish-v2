@@ -1,0 +1,12 @@
+~ Here we showcase functions as parameters.
+
+let rep = fn(f: fn void(int), from: int, to: int)
+  let cur = from
+  while cur < to
+    f(cur)
+    cur = cur + 1
+
+let f1 = fn(x: int)
+  print("f1: " + show(x) + "\n")
+
+rep(f1, 0, 10)

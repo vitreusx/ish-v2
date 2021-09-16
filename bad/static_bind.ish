@@ -1,0 +1,11 @@
+~ Here we shall demonstrate static lexical binding, a
+~ bad case.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+let f = fn()
+  print(show(y))
+
+let y = 1
+f()

@@ -174,6 +174,7 @@ evalSt (While _ cond body) = do
     typecheck' <- use $ curEnv . typecheck
     if typecheck'
       then do
+        declare Continue $ Jump (brk ())
         evalX cond (ExactType BoolT)
         mapM_ evalSt body
       else do
@@ -232,7 +233,7 @@ evalWhile cond body = do
     callCC $ \cont -> do
       declare Continue $ Jump (cont ())
       mapM_ evalSt body
-      evalWhile cond body
+    evalWhile cond body
 
 evalLet :: LetItem -> Eval ()
 evalLet (x, mt, e) = do

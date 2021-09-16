@@ -1,0 +1,25 @@
+~ Here we demonstrate overloading, for "both"
+~ values and functions (although they occupy the
+~ same kind in this type system).
+
+~ Note: this is an extremely contrived example.
+
+let repInit = ""
+let repInit = 0
+
+let repAdd = fn(s: string, n: int)
+  let fin: string = repInit
+  while n > 0
+    fin = fin + s
+    n = n - 1
+  return fin
+
+let repAdd = fn(x: int, n: int)
+  let fin: int = repInit
+  while n > 0
+    fin = fin + x
+    n = n - 1
+  return fin
+
+print(repAdd("a", 10) + "\n")
+print(show(repAdd(7, 10)) + "\n")

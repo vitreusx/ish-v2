@@ -1,0 +1,10 @@
+~ Here we shall showcase a use of an operator
+
+~ First, we declare the operator to the parser.
+#[op 2 infixl @]
+
+~ Next, we associate with it a function.
+let `@` = fn(s1: string, s2: string)
+  return s1 + " @ " + s2
+
+print("a" @ "b" + "\n")

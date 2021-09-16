@@ -1,0 +1,10 @@
+~ This is an extension of the "bad type" lookup error, but
+~ functions with bad # of types will also not match.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+let f = fn (x: int)
+  return x
+
+f(0, 1)

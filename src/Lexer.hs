@@ -10,7 +10,7 @@ import           Control.Monad                  ( void )
 import           Text.Read.Lex
 
 lineComment :: Parser ()
-lineComment = Lex.skipLineComment "--"
+lineComment = Lex.skipLineComment "~" >> scn
 
 sc :: Parser ()
 sc = Lex.space hspace1 lineComment empty

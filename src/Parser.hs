@@ -7,7 +7,7 @@ module Parser where
 import           Text.Megaparsec         hiding ( State
                                                 , ParseError
                                                 )
-import qualified Text.Megaparsec               as Mp
+import           Text.Megaparsec.Pos           as Pos
 import           Control.Monad.Combinators.Expr
 import           Control.Monad.State
 import           Data.Map.Strict               as Map
@@ -15,20 +15,21 @@ import           Syntax
 import           Control.Lens
 import qualified Data.Set                      as Set
 
-type Ref = Mp.State String ParseError
+newtype SRef = SRef Pos.SourcePos
+  deriving (Eq, Ord)
 
-instance {-# OVERLAPS #-} Show Ref where
-  show x = "[Ref]"
+instance Show SRef where
+  show (SRef r) = sourcePosPretty r
 
-type TopLevel = TopLevel' Ref
-type Ident = Ident' Ref
-type Expr = Expr' Ref
-type Stmt = Stmt' Ref
-type LetItem = LetItem' Ref
-type AssignItem = AssignItem' Ref
+type TopLevel = TopLevel' SRef
+type Ident = Ident' SRef
+type Expr = Expr' SRef
+type Stmt = Stmt' SRef
+type LetItem = LetItem' SRef
+type AssignItem = AssignItem' SRef
 
-ref :: Parser Ref
-ref = getParserState
+ref :: Parser SRef
+ref = SRef <$> getSourcePos
 
 type IndentInfo = (Int, Int)
 

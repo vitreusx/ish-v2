@@ -1,0 +1,7 @@
+~ Here we shall declare a variable with prescribed type
+~ and assign to it a bad value.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+let x: int = "s"

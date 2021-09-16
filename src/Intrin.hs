@@ -11,6 +11,7 @@ import           Control.Lens
 import           Data.Text
 import           Control.Monad.IO.Class
 import           Control.Monad.State
+import           Control.Monad.Except
 
 intrinV :: String -> Value -> Ish ()
 intrinV x t = liftEval $ do
@@ -37,7 +38,6 @@ intrinVars = do
   intrinV "false"  (BoolV False)
   intrinV "string" StringT
   intrinV "void"   VoidT
-
 
 fnFutures :: String
 fnFutures = unpack [text|
@@ -80,7 +80,7 @@ future `||`: fn bool(bool, bool)
 future show: fn string(int)
 future show: fn string(bool)
 future print: fn void(string)
-future error: fn void(string)
+future fail: fn void(string)
 future typeof: fn string(string)
 future valof: fn string(string)
 |]
@@ -101,8 +101,10 @@ intrinFns = do
   intrinF "-" (FnT IntT [IntT]) $ \[IntV n] -> return $ IntV (-n)
   intrinF "*" (FnT IntT [IntT, IntT])
     $ \[IntV n, IntV m] -> return $ IntV (n * m)
-  intrinF "/" (FnT IntT [IntT, IntT])
-    $ \[IntV n, IntV m] -> return $ IntV (n `div` m)
+  intrinF "/" (FnT IntT [IntT, IntT]) $ \[IntV n, IntV m] -> do
+    if m == 0
+      then throwError DivisionByZero
+      else return $ IntV (n `div` m)
   intrinF "%" (FnT IntT [IntT, IntT])
     $ \[IntV n, IntV m] -> return $ IntV (n `mod` m)
   intrinF "+" (FnT IntT [IntT, IntT])
@@ -142,7 +144,7 @@ intrinFns = do
     $ \[BoolV p] -> return $ StringV (show p)
   intrinF "print" (FnT VoidT [StringT])
     $ \[StringV s] -> liftIO $ putStr s >> return VoidV
-  intrinF "error" (FnT VoidT [StringT])
+  intrinF "fail" (FnT VoidT [StringT])
     $ \[StringV s] -> liftIO $ fail s >> return VoidV
   intrinF "typeof" (FnT StringT [StringT]) $ \[StringV x] -> do
     vlens <- VM.lookup (FromName x) AnyType

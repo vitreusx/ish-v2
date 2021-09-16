@@ -1,0 +1,6 @@
+~ Here `if` and `else` should be on the same level.
+
+if x == 5
+  print(show(x))
+   else
+  print(show(-x))

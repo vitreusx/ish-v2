@@ -1,0 +1,9 @@
+~ Here we will have the function return two different
+~ types.
+
+~ If it runs, the check wasn't performed in a static manner.
+fail("[typechecker not static]")
+
+let f = fn()
+  return 0
+  return "s"
